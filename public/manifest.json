@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "GraphLens",
+  "version": "1.0.0",
+  "description": "Inspect GraphQL traffic — HTTP, WebSocket, and SSE — with filtering, search, and full request details.",
+  "devtools_page": "devtools.html",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["patch.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["injector.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ]
+}
