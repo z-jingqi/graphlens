@@ -1,3 +1,4 @@
 node_modules/
 dist/
 graphlens.zip
+.DS_Store
