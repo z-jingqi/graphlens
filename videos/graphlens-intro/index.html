@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      :root {
+        --canvas: #f5f1e8;
+        --surface: #fffdf8;
+        --chrome: #25231f;
+        --chrome-2: #34312c;
+        --ink: #2f2a22;
+        --muted: #746d62;
+        --line: #ded5c7;
+        --line-dark: #4a453e;
+        --accent: #b66a33;
+        --accent-soft: #f1d7c3;
+        --success: #2f9c5c;
+        --purple: #8552c6;
+        --blue: #2f8091;
+        --error: #c9453d;
+        --shadow: 0 28px 70px rgba(52, 42, 32, 0.22);
+        font-family: system-ui, sans-serif;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--canvas);
+        color: var(--ink);
+      }
+
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background:
+          linear-gradient(90deg, rgba(37, 35, 31, 0.05) 1px, transparent 1px),
+          linear-gradient(0deg, rgba(37, 35, 31, 0.045) 1px, transparent 1px),
+          radial-gradient(circle at 78% 18%, rgba(182, 106, 51, 0.10), transparent 34%),
+          var(--canvas);
+        background-size: 48px 48px, 48px 48px, auto, auto;
+      }
+
+      .brand-bar {
+        position: absolute;
+        left: 92px;
+        right: 92px;
+        top: 50px;
+        height: 80px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        z-index: 20;
+      }
+
+      .brand-lockup {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .logo-mark {
+        width: 58px;
+        height: 58px;
+        border: 1px solid rgba(182, 106, 51, 0.34);
+        border-radius: 8px;
+        background: var(--surface);
+        display: grid;
+        place-items: center;
+        box-shadow: 0 12px 28px rgba(91, 64, 40, 0.14);
+      }
+
+      .logo-mark svg {
+        width: 39px;
+        height: 39px;
+        fill: none;
+        stroke: var(--accent);
+        stroke-width: 2.4;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .brand-title {
+        font-size: 28px;
+        font-weight: 780;
+        letter-spacing: 0;
+        color: var(--ink);
+      }
+
+      .brand-subtitle {
+        margin-top: 4px;
+        font-size: 15px;
+        color: var(--muted);
+      }
+
+      .stage {
+        position: absolute;
+        left: 92px;
+        right: 92px;
+        top: 156px;
+        bottom: 64px;
+      }
+
+      .browser {
+        position: absolute;
+        inset: 0;
+        border-radius: 8px;
+        overflow: hidden;
+        background: var(--surface);
+        border: 1px solid rgba(67, 58, 48, 0.28);
+        box-shadow: var(--shadow);
+      }
+
+      .devtools {
+        position: absolute;
+        inset: 0;
+        background: var(--surface);
+        display: grid;
+        grid-template-rows: 40px 1fr;
+      }
+
+      .devtools-tabs {
+        background: var(--chrome-2);
+        border-top: 1px solid var(--line-dark);
+        display: flex;
+        align-items: end;
+        padding: 0 18px;
+        color: #d9d1c6;
+        gap: 2px;
+      }
+
+      .devtab {
+        height: 32px;
+        padding: 0 16px;
+        display: flex;
+        align-items: center;
+        border-radius: 7px 7px 0 0;
+        font-size: 13px;
+        border: 1px solid transparent;
+        border-bottom: 0;
+      }
+
+      .devtab.active {
+        color: var(--ink);
+        background: var(--surface);
+        border-color: var(--line);
+        position: relative;
+      }
+
+      .devtab.active::before {
+        content: "";
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        top: 0;
+        height: 3px;
+        border-radius: 0 0 3px 3px;
+        background: var(--accent);
+      }
+
+      .panel {
+        position: relative;
+        display: grid;
+        grid-template-rows: 36px 1fr;
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      .filter-bar {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+        font-size: 12px;
+      }
+
+      .tool-button,
+      .chip,
+      .seg {
+        height: 23px;
+        border-radius: 7px;
+        border: 1px solid transparent;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        white-space: nowrap;
+      }
+
+      .tool-button {
+        width: 24px;
+        color: var(--muted);
+      }
+
+      .recording-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 1.5px solid var(--error);
+        background: var(--error);
+      }
+
+      .filter-input {
+        height: 23px;
+        width: 220px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: #fbf8f1;
+        display: flex;
+        align-items: center;
+        padding: 0 10px;
+        color: var(--muted);
+      }
+
+      .divider {
+        width: 1px;
+        height: 21px;
+        background: var(--line);
+      }
+
+      .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+      }
+
+      .fake-checkbox {
+        width: 13px;
+        height: 13px;
+        border-radius: 3px;
+        border: 1px solid var(--line);
+      }
+
+      .fake-checkbox.checked {
+        background: var(--accent);
+        border-color: var(--accent);
+        box-shadow: inset 0 0 0 3px #fff6ee;
+      }
+
+      .chip {
+        padding: 0 10px;
+        color: var(--muted);
+        background: rgba(244, 238, 228, 0.65);
+      }
+
+      .chip.active,
+      .seg.active {
+        color: var(--accent);
+        background: rgba(182, 106, 51, 0.13);
+      }
+
+      .seg {
+        padding: 0 8px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .devtools-body {
+        position: relative;
+        display: grid;
+        grid-template-columns: 650px 1fr;
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      .request-list {
+        min-width: 0;
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+      }
+
+      .table-head,
+      .request-row {
+        display: grid;
+        grid-template-columns: 1fr 86px 86px 86px;
+        gap: 8px;
+        align-items: center;
+        padding: 0 13px;
+      }
+
+      .table-head {
+        flex: 0 0 32px;
+        height: 32px;
+        border-bottom: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 10px;
+        text-transform: uppercase;
+        font-weight: 760;
+      }
+
+      .request-row {
+        flex: 0 0 38px;
+        height: 38px;
+        border-bottom: 1px solid rgba(222, 213, 199, 0.66);
+        font-size: 12px;
+        border-left: 3px solid transparent;
+        background: var(--surface);
+        overflow: hidden;
+      }
+
+      .request-row.selected {
+        border-left-color: var(--accent);
+        background: rgba(182, 106, 51, 0.13);
+      }
+
+      .request-row.error {
+        border-left-color: var(--error);
+      }
+
+      .request-name {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-width: 0;
+        font-weight: 650;
+      }
+
+      .request-name span:last-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .avatar {
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+        display: grid;
+        place-items: center;
+        color: #fffaf3;
+        font-size: 11px;
+        font-weight: 820;
+        flex: 0 0 auto;
+        background: var(--accent);
+      }
+
+      .avatar.query { background: var(--blue); }
+      .avatar.mutation { background: var(--accent); }
+
+      .mono {
+        font-family: monospace;
+      }
+
+      .ok { color: var(--success); }
+      .bad { color: var(--error); font-weight: 760; }
+      .muted { color: var(--muted); }
+
+      .detail {
+        min-width: 0;
+        display: grid;
+        grid-template-rows: 56px 38px 1fr;
+      }
+
+      .detail-head {
+        min-width: 0;
+        border-bottom: 1px solid var(--line);
+        padding: 8px 14px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .detail-url {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        font-size: 12px;
+      }
+
+      .detail-url .mono {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .op-label {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .copy-button {
+        height: 28px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .tabs {
+        display: flex;
+        align-items: end;
+        gap: 2px;
+        padding: 0 10px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .tab {
+        height: 30px;
+        padding: 0 12px;
+        display: flex;
+        align-items: center;
+        font-size: 12px;
+        color: var(--muted);
+        border-bottom: 2px solid transparent;
+      }
+
+      .tab.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+        font-weight: 720;
+      }
+
+      .detail-content {
+        position: relative;
+        overflow: hidden;
+        background: #fbf8f1;
+      }
+
+      .code-pane,
+      .json-pane,
+      .headers-pane {
+        position: absolute;
+        inset: 0;
+        padding: 18px 20px;
+        font-family: monospace;
+        font-size: 13px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        color: var(--ink);
+      }
+
+      .headers-pane {
+        padding: 12px 16px;
+        line-height: 1.32;
+        white-space: normal;
+      }
+
+      .json-pane,
+      .headers-pane {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      .header-row {
+        display: grid;
+        grid-template-columns: 150px minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+        min-height: 28px;
+        padding: 4px 0;
+        border-bottom: 1px solid rgba(222, 213, 199, 0.64);
+      }
+
+      .header-key {
+        color: var(--purple);
+      }
+
+      .header-row span {
+        overflow-wrap: anywhere;
+      }
+
+      .key { color: var(--purple); }
+      .str { color: var(--accent); }
+      .num { color: var(--success); }
+      .kw { color: var(--muted); }
+      .fn { color: #8a4f2a; font-weight: 760; }
+      .var { color: var(--blue); }
+
+      .callout {
+        position: absolute;
+        z-index: 25;
+        min-width: 300px;
+        max-width: 432px;
+        border: 1px solid rgba(182, 106, 51, 0.38);
+        border-radius: 8px;
+        background: rgba(255, 253, 248, 0.96);
+        box-shadow: 0 18px 42px rgba(70, 53, 38, 0.20);
+        padding: 16px 18px;
+        opacity: 0;
+        transform: translateY(12px);
+      }
+
+      .callout-kicker {
+        font-size: 12px;
+        color: var(--accent);
+        font-weight: 820;
+        margin-bottom: 6px;
+      }
+
+      .callout-title {
+        font-size: 22px;
+        line-height: 1.22;
+        font-weight: 820;
+        letter-spacing: 0;
+      }
+
+      .callout-copy {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.48;
+      }
+
+      .callout.one { left: 118px; top: 30px; }
+      .callout.two { right: 70px; top: 92px; }
+      .callout.three { left: 106px; bottom: 50px; }
+
+      .final-scene {
+        position: absolute;
+        inset: 0;
+        z-index: 32;
+        background:
+          linear-gradient(90deg, rgba(37, 35, 31, 0.05) 1px, transparent 1px),
+          linear-gradient(0deg, rgba(37, 35, 31, 0.045) 1px, transparent 1px),
+          var(--canvas);
+        background-size: 48px 48px;
+        opacity: 0;
+        display: grid;
+        grid-template-rows: 140px 1fr;
+        padding: 52px 92px 76px;
+      }
+
+      .final-stage {
+        display: grid;
+        grid-template-columns: 0.9fr 1.1fr;
+        gap: 44px;
+        align-items: stretch;
+      }
+
+      .final-copy {
+        align-self: center;
+      }
+
+      .final-title {
+        font-size: 70px;
+        line-height: 1.04;
+        letter-spacing: 0;
+        font-weight: 840;
+      }
+
+      .final-subtitle {
+        margin-top: 22px;
+        width: 610px;
+        color: var(--muted);
+        font-size: 24px;
+        line-height: 1.45;
+      }
+
+      .benefit-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+        align-self: center;
+      }
+
+      .benefit {
+        border: 1px solid var(--line);
+        background: rgba(255, 253, 248, 0.9);
+        border-radius: 8px;
+        padding: 25px 24px;
+        min-height: 158px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        box-shadow: 0 16px 38px rgba(70, 53, 38, 0.10);
+      }
+
+      .benefit-num {
+        color: var(--accent);
+        font-family: monospace;
+        font-size: 14px;
+        font-weight: 780;
+      }
+
+      .benefit-title {
+        margin-top: 18px;
+        font-size: 24px;
+        font-weight: 820;
+        line-height: 1.2;
+      }
+
+      .benefit-copy {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.45;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="15"
+      data-width="1920"
+      data-height="1080"
+    >
+      <header class="brand-bar">
+        <div class="brand-lockup">
+          <div class="logo-mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48">
+              <path d="M7 25c5-9 11-13 17-13s12 4 17 13c-5 9-11 13-17 13S12 34 7 25Z" />
+              <circle cx="24" cy="25" r="6" />
+              <path d="M12 39l7-8M36 39l-7-8M18 13l-4-6M30 13l4-6" />
+            </svg>
+          </div>
+          <div>
+            <div class="brand-title">GraphLens</div>
+            <div class="brand-subtitle">Chrome DevTools extension for GraphQL traffic</div>
+          </div>
+        </div>
+      </header>
+
+      <main class="stage">
+        <section class="browser" id="browser">
+          <div class="devtools">
+            <div class="devtools-tabs">
+              <div class="devtab">Elements</div>
+              <div class="devtab">Console</div>
+              <div class="devtab">Network</div>
+              <div class="devtab active" id="graphlensTab">GraphLens</div>
+              <div class="devtab">Application</div>
+            </div>
+
+            <section class="panel">
+              <div class="filter-bar">
+                <div class="tool-button"><span class="recording-dot"></span></div>
+                <div class="tool-button">x</div>
+                <div class="divider"></div>
+                <div class="filter-input" id="filterInput">Filter</div>
+                <div class="checkbox-label"><span class="fake-checkbox"></span><span>Invert</span></div>
+                <div class="checkbox-label"><span class="fake-checkbox checked"></span><span>Preserve log</span></div>
+                <div class="divider"></div>
+                <div class="chip active" id="transportChip">Transport: GraphQL</div>
+                <div class="divider"></div>
+                <div class="seg active">All</div>
+                <div class="seg" id="querySeg">Query</div>
+                <div class="seg" id="mutationSeg">Mutation</div>
+              </div>
+
+              <div class="devtools-body">
+                <div class="request-list" id="requestList">
+                  <div class="table-head"><span>Name</span><span>Status</span><span>Size</span><span>Time</span></div>
+                  <div class="request-row" id="rowCart">
+                    <div class="request-name"><span class="avatar query">Q</span><span>GetCart</span></div>
+                    <div class="mono ok">200</div><div class="mono muted">3.8 KB</div><div class="mono muted">42ms</div>
+                  </div>
+                  <div class="request-row" id="rowShipping">
+                    <div class="request-name"><span class="avatar query">Q</span><span>EstimateShipping</span></div>
+                    <div class="mono ok">200</div><div class="mono muted">2.4 KB</div><div class="mono muted">58ms</div>
+                  </div>
+                  <div class="request-row" id="rowCheckout">
+                    <div class="request-name"><span class="avatar mutation">M</span><span>UpdateCheckout</span></div>
+                    <div class="mono ok">200</div><div class="mono muted">6.1 KB</div><div class="mono muted">117ms</div>
+                  </div>
+                  <div class="request-row" id="rowCoupon">
+                    <div class="request-name"><span class="avatar mutation">M</span><span>ApplyCoupon</span></div>
+                    <div class="mono ok">200</div><div class="mono muted">1.9 KB</div><div class="mono muted">74ms</div>
+                  </div>
+                  <div class="request-row error" id="rowProfile">
+                    <div class="request-name"><span class="avatar query">Q</span><span>PersistedProfile</span></div>
+                    <div class="mono bad">400</div><div class="mono muted">1.2 KB</div><div class="mono muted">63ms</div>
+                  </div>
+                  <div class="request-row" id="rowOrder">
+                    <div class="request-name"><span class="avatar mutation">M</span><span>CompleteOrder</span></div>
+                    <div class="mono ok">200</div><div class="mono muted">7.3 KB</div><div class="mono muted">132ms</div>
+                  </div>
+                </div>
+
+                <div class="detail" id="detailPanel">
+                  <div class="detail-head">
+                    <div class="detail-title">
+                      <div class="detail-url"><span class="avatar query" id="detailAvatar">Q</span><span class="mono">https://api.shop.local/graphql</span></div>
+                      <div class="op-label mono" id="detailOp">QUERY GetCart</div>
+                    </div>
+                    <div class="copy-button">Copy</div>
+                  </div>
+                  <div class="tabs">
+                    <div class="tab" id="headersTab">Headers</div>
+                    <div class="tab active" id="queryTab">Query</div>
+                    <div class="tab" id="variablesTab">Variables</div>
+                    <div class="tab" id="responseTab">Response</div>
+                  </div>
+                  <div class="detail-content">
+                    <pre class="code-pane" id="queryPane"><span class="kw">query</span> <span class="fn">GetCart</span>(<span class="var">$id</span>: ID!) {
+  cart(id: <span class="var">$id</span>) {
+    id
+    total { amount currency }
+    items { sku qty name }
+  }
+}</pre>
+                    <pre class="json-pane" id="variablesPane">{
+  <span class="key">"id"</span>: <span class="str">"cart_2048"</span>,
+  <span class="key">"coupon"</span>: <span class="str">"WELCOME10"</span>,
+  <span class="key">"paymentMethod"</span>: <span class="str">"card"</span>
+}</pre>
+                    <pre class="json-pane" id="responsePane">{
+  <span class="key">"data"</span>: {
+    <span class="key">"cart"</span>: {
+      <span class="key">"id"</span>: <span class="str">"cart_2048"</span>,
+      <span class="key">"total"</span>: { <span class="key">"amount"</span>: <span class="num">148</span>, <span class="key">"currency"</span>: <span class="str">"USD"</span> },
+      <span class="key">"items"</span>: [
+        { <span class="key">"sku"</span>: <span class="str">"GL-42"</span>, <span class="key">"qty"</span>: <span class="num">2</span> }
+      ]
+    }
+  }
+}</pre>
+                    <div class="headers-pane" id="headersPane">
+                      <div class="header-row"><span class="header-key">content-type</span><span>application/json</span></div>
+                      <div class="header-row"><span class="header-key">x-operation-name</span><span>UpdateCheckout</span></div>
+                      <div class="header-row"><span class="header-key">apollo-require-preflight</span><span>true</span></div>
+                      <div class="header-row"><span class="header-key">cache-control</span><span>no-store</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <aside class="callout one" id="calloutCapture">
+          <div class="callout-kicker">01 / Capture</div>
+          <div class="callout-title">GraphQL operations land in their own DevTools panel.</div>
+          <div class="callout-copy">The request list stays compact: operation name, type, status, size, and timing.</div>
+        </aside>
+
+        <aside class="callout two" id="calloutFilter">
+          <div class="callout-kicker">02 / Filter</div>
+          <div class="callout-title">Focus on queries or mutations without digging through Network.</div>
+          <div class="callout-copy">Use the filter bar to narrow by operation name, URL, or GraphQL operation type.</div>
+        </aside>
+
+        <aside class="callout three" id="calloutDetail">
+          <div class="callout-kicker">03 / Inspect</div>
+          <div class="callout-title">Open the exact query, variables, headers, and response.</div>
+          <div class="callout-copy">Syntax-highlighted GraphQL and structured JSON make each request easy to review and copy.</div>
+        </aside>
+
+      </main>
+
+      <section class="final-scene" id="finalScene">
+        <div class="brand-lockup">
+          <div class="logo-mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48">
+              <path d="M7 25c5-9 11-13 17-13s12 4 17 13c-5 9-11 13-17 13S12 34 7 25Z" />
+              <circle cx="24" cy="25" r="6" />
+              <path d="M12 39l7-8M36 39l-7-8M18 13l-4-6M30 13l4-6" />
+            </svg>
+          </div>
+          <div>
+            <div class="brand-title">GraphLens</div>
+            <div class="brand-subtitle">Inspect GraphQL traffic inside Chrome DevTools</div>
+          </div>
+        </div>
+        <div class="final-stage">
+          <div class="final-copy">
+            <div class="final-title">See every GraphQL request clearly.</div>
+            <div class="final-subtitle">GraphLens keeps queries, mutations, payloads, responses, errors, and copy-ready details in one DevTools workflow.</div>
+          </div>
+          <div class="benefit-grid">
+            <div class="benefit">
+              <div class="benefit-num">Q / M</div>
+              <div>
+                <div class="benefit-title">Operation-aware rows</div>
+                <div class="benefit-copy">Scan queries and mutations by name, status, size, and duration.</div>
+              </div>
+            </div>
+            <div class="benefit">
+              <div class="benefit-num">DETAILS</div>
+              <div>
+                <div class="benefit-title">Full request context</div>
+                <div class="benefit-copy">Jump between query, variables, headers, and response JSON.</div>
+              </div>
+            </div>
+            <div class="benefit">
+              <div class="benefit-num">ERRORS</div>
+              <div>
+                <div class="benefit-title">Fast error visibility</div>
+                <div class="benefit-copy">Failed operations stand out in the list before you open the payload.</div>
+              </div>
+            </div>
+            <div class="benefit">
+              <div class="benefit-num">COPY</div>
+              <div>
+                <div class="benefit-title">Copy-ready debugging</div>
+                <div class="benefit-copy">Share the exact request, response, or value when reproducing a bug.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      gsap.set("#detailPanel", { opacity: 0.82 });
+
+      function activateTab(active, inactive, at) {
+        tl.to(inactive, { color: "#746d62", borderBottomColor: "transparent", fontWeight: 400, duration: 0.18 }, at)
+          .to(active, { color: "#b66a33", borderBottomColor: "#b66a33", fontWeight: 720, duration: 0.18 }, at);
+      }
+
+      const mutationQueryHtml = `<span class="kw">mutation</span> <span class="fn">UpdateCheckout</span>(<span class="var">$id</span>: ID!, <span class="var">$coupon</span>: String) {
+  updateCheckout(id: <span class="var">$id</span>, coupon: <span class="var">$coupon</span>) {
+    id
+    total { amount currency }
+    status
+  }
+}`;
+
+      tl.from("#browser", { y: 34, opacity: 0, scale: 0.985, duration: 0.58, ease: "power3.out" }, 0.08)
+        .from(".brand-lockup", { y: -14, opacity: 0, duration: 0.42, ease: "power3.out" }, 0.12)
+        .from(".devtools", { y: 48, opacity: 0, duration: 0.48, ease: "power3.out" }, 0.48)
+        .from("#calloutCapture", { opacity: 0, y: 18, duration: 0.38, ease: "power3.out" }, 0.82);
+
+      tl.fromTo("#rowCheckout, #rowCoupon, #rowOrder", { backgroundColor: "#fffdf8" }, { backgroundColor: "#f6e6d8", duration: 0.22, stagger: 0.1, yoyo: true, repeat: 1 }, 1.9)
+        .fromTo("#rowProfile", { backgroundColor: "#fffdf8" }, { backgroundColor: "#f8dedb", duration: 0.22, yoyo: true, repeat: 1 }, 2.45)
+        .to("#calloutCapture", { opacity: 0, y: -12, duration: 0.24, ease: "power2.in" }, 3.0)
+        .from("#calloutFilter", { opacity: 0, y: 18, duration: 0.36, ease: "power3.out" }, 3.14)
+        .to("#filterInput", { backgroundColor: "#fff6ee", duration: 0.18 }, 3.78)
+        .set("#filterInput", { textContent: "checkout" }, 3.9)
+        .to("#querySeg", { backgroundColor: "rgba(47, 128, 145, 0.12)", color: "#2f8091", duration: 0.18 }, 4.16)
+        .to("#mutationSeg", { backgroundColor: "rgba(182, 106, 51, 0.13)", color: "#b66a33", duration: 0.18 }, 4.36)
+        .set("#rowCart, #rowShipping, #rowCoupon, #rowProfile, #rowOrder", { opacity: 0, visibility: "hidden" }, 4.58)
+        .to("#rowCart, #rowShipping, #rowCoupon, #rowProfile, #rowOrder", { height: 0, flexBasis: 0, paddingTop: 0, paddingBottom: 0, borderWidth: 0, duration: 0.28, ease: "power2.inOut" }, 4.58);
+
+      tl.set("#detailAvatar", { textContent: "M" }, 4.62)
+        .set("#detailOp", { textContent: "MUTATION UpdateCheckout" }, 4.62)
+        .set("#queryPane", { innerHTML: mutationQueryHtml }, 4.62)
+        .to("#detailAvatar", { backgroundColor: "#b66a33", duration: 0.14 }, 4.62)
+        .to("#detailPanel", { opacity: 1, duration: 0.18 }, 4.66)
+        .to("#rowCheckout", { backgroundColor: "rgba(182, 106, 51, 0.13)", duration: 0.22 }, 4.78)
+        .to("#queryPane", { opacity: 0, y: -8, duration: 0.2, ease: "power2.in" }, 5.95)
+        .to("#variablesPane", { opacity: 1, y: 0, duration: 0.3, ease: "power3.out" }, 6.12);
+      activateTab("#variablesTab", "#queryTab", 5.92);
+
+      tl.to("#calloutFilter", { opacity: 0, y: -12, duration: 0.24, ease: "power2.in" }, 6.82)
+        .from("#calloutDetail", { opacity: 0, y: 18, duration: 0.36, ease: "power3.out" }, 6.96)
+        .to("#variablesPane", { opacity: 0, y: -8, duration: 0.2, ease: "power2.in" }, 7.84)
+        .to("#responsePane", { opacity: 1, y: 0, duration: 0.3, ease: "power3.out" }, 8.0)
+        .fromTo("#responsePane .num", { backgroundColor: "rgba(241, 215, 195, 0)" }, { backgroundColor: "rgba(241, 215, 195, 0.82)", duration: 0.24, yoyo: true, repeat: 1 }, 8.42)
+        .to("#responsePane", { opacity: 0, y: -8, duration: 0.2, ease: "power2.in" }, 9.18)
+        .to("#headersPane", { opacity: 1, y: 0, duration: 0.3, ease: "power3.out" }, 9.34)
+        .to(".copy-button", { backgroundColor: "#fff6ee", borderColor: "#b66a33", color: "#b66a33", duration: 0.2 }, 10.0);
+      activateTab("#responseTab", "#variablesTab", 7.8);
+      activateTab("#headersTab", "#responseTab", 9.14);
+
+      tl.to("#calloutDetail", { opacity: 0, y: -12, duration: 0.24, ease: "power2.in" }, 10.62)
+        .to("#browser", { opacity: 0, scale: 0.985, y: -16, duration: 0.5, ease: "power2.inOut" }, 11.0)
+        .to(".brand-bar", { opacity: 0, y: -16, duration: 0.34, ease: "power2.in" }, 11.12)
+        .to("#finalScene", { opacity: 1, duration: 0.55, ease: "power2.out" }, 11.42)
+        .from(".final-title", { y: 24, opacity: 0, duration: 0.4, ease: "power3.out" }, 11.76)
+        .from(".final-subtitle", { y: 18, opacity: 0, duration: 0.36, ease: "power3.out" }, 11.96)
+        .from(".benefit", { y: 26, opacity: 0, duration: 0.34, stagger: 0.08, ease: "power3.out" }, 12.2)
+        .to(".benefit:nth-child(1)", { borderColor: "#b66a33", duration: 0.18, yoyo: true, repeat: 1 }, 13.42)
+        .to(".benefit:nth-child(2)", { borderColor: "#2f8091", duration: 0.18, yoyo: true, repeat: 1 }, 13.62)
+        .to(".benefit:nth-child(3)", { borderColor: "#c9453d", duration: 0.18, yoyo: true, repeat: 1 }, 13.82)
+        .to(".benefit:nth-child(4)", { borderColor: "#8552c6", duration: 0.18, yoyo: true, repeat: 1 }, 14.02);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
