@@ -49,6 +49,7 @@ export function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
         e.preventDefault()
+        e.stopImmediatePropagation()
         if (selectedRef.current) {
           // Detail panel is open — bump the nonce to trigger in-panel find.
           setDetailFindNonce(n => (n ?? 0) + 1)
@@ -57,8 +58,9 @@ export function App() {
         }
       }
     }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
+    // capture:true ensures we intercept before Chrome's native find handler.
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
   }, [])
 
   const handleSelect = (req: CapturedRequest) => {

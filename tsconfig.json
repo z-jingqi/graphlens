@@ -13,5 +13,5 @@
     "jsx": "react-jsx",
     "strict": true
   },
-  "include": ["src", "devtools.html", "panel.html"]
+  "include": ["src", "test", "e2e", "vitest.config.ts", "playwright.config.ts", "devtools.html", "panel.html"]
 }

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>GraphLens Test Harness</title>
+  <style>
+    body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 2rem; }
+    h1 { color: #c084fc; margin-bottom: 0.5rem; }
+    h2 { color: #818cf8; margin-top: 1.5rem; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.1em; }
+    .grid { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
+    button {
+      background: #2d2d3f; border: 1px solid #4a4a6a; color: #c084fc;
+      padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-family: monospace;
+      font-size: 0.85rem; transition: background 0.15s;
+    }
+    button:hover { background: #3d3d5f; border-color: #818cf8; }
+    button.negative { color: #f87171; border-color: #6b2121; }
+    button.negative:hover { background: #3d1a1a; }
+    #log { margin-top: 1rem; background: #0f0f1a; border: 1px solid #2d2d4a; border-radius: 6px;
+           padding: 1rem; max-height: 300px; overflow-y: auto; font-size: 0.8rem; }
+    .log-entry { padding: 2px 0; border-bottom: 1px solid #1a1a2e; }
+    .log-entry.ok { color: #34d399; }
+    .log-entry.err { color: #f87171; }
+    .log-entry.info { color: #94a3b8; }
+    #status { margin-top: 0.5rem; font-size: 0.8rem; color: #64748b; }
+  </style>
+</head>
+<body>
+  <h1>GraphLens Test Harness</h1>
+  <p style="color:#94a3b8;font-size:0.85rem;">
+    Open the GraphLens panel in Chrome DevTools, then click the buttons below.
+    Each request should appear in the panel.
+  </p>
+
+  <h2>HTTP GraphQL (fetch)</h2>
+  <div class="grid">
+    <button data-trigger="graphql-query" onclick="doQuery()">Query (GET user)</button>
+    <button data-trigger="graphql-mutation" onclick="doMutation()">Mutation (createUser)</button>
+    <button data-trigger="graphql-batch" onclick="doBatch()">Batch (2 ops)</button>
+    <button data-trigger="graphql-persisted" onclick="doPersisted()">Persisted query (POST)</button>
+    <button data-trigger="graphql-get" onclick="doGetQuery()">GET query params</button>
+    <button data-trigger="graphql-apq" onclick="doGetAPQ()">GET APQ</button>
+    <button data-trigger="graphql-error" onclick="doError()" class="negative">Error response (errors[])</button>
+  </div>
+
+  <h2>HTTP GraphQL (XHR)</h2>
+  <div class="grid">
+    <button data-trigger="graphql-xhr" onclick="doXhr()">XHR query</button>
+  </div>
+
+  <h2>WebSocket (graphql-ws)</h2>
+  <div class="grid">
+    <button data-trigger="graphql-ws-subscribe" onclick="doWsSubscribe()">WS subscribe (countdown)</button>
+    <button data-trigger="graphql-ws-stop" onclick="stopWs()" class="negative">Stop WS</button>
+  </div>
+
+  <h2>SSE (GraphQL-over-SSE)</h2>
+  <div class="grid">
+    <button data-trigger="fetch-sse" onclick="doFetchSse()">fetch-SSE subscription (countdown)</button>
+  </div>
+
+  <h2 style="color:#ef4444;">Negative tests (should NOT appear in GraphLens)</h2>
+  <div class="grid">
+    <button data-trigger="plain-ws" onclick="doPlainWs()" class="negative">Plain WS (non-GraphQL)</button>
+    <button data-trigger="plain-sse" onclick="doPlainSse()" class="negative">Plain SSE (non-GraphQL)</button>
+  </div>
+
+  <div id="status"></div>
+  <div id="log"></div>
+
+  <script>
+    const BASE = 'http://localhost:3099'
+    const WS_BASE = 'ws://localhost:3099'
+    let wsConn = null
+
+    function log(msg, type = 'info') {
+      const el = document.getElementById('log')
+      const entry = document.createElement('div')
+      entry.className = `log-entry ${type}`
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`
+      el.prepend(entry)
+    }
+
+    function status(msg) {
+      document.getElementById('status').textContent = msg
+    }
+
+    // ── HTTP fetch ──────────────────────────────────────────────────────────
+
+    async function doQuery() {
+      status('Sending query…')
+      try {
+        const res = await fetch(`${BASE}/graphql`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ query: 'query GetUser { user(id: "1") { id name } }', operationName: 'GetUser' }),
+        })
+        const data = await res.json()
+        log(`Query OK: ${JSON.stringify(data.data)}`, 'ok')
+      } catch(e) { log(`Query ERR: ${e}`, 'err') }
+      status('')
+    }
+
+    async function doMutation() {
+      status('Sending mutation…')
+      try {
+        const res = await fetch(`${BASE}/graphql`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ query: 'mutation CreateUser($name: String!) { createUser(name: $name) { id name } }', operationName: 'CreateUser', variables: { name: 'Alice' } }),
+        })
+        const data = await res.json()
+        log(`Mutation OK: ${JSON.stringify(data.data)}`, 'ok')
+      } catch(e) { log(`Mutation ERR: ${e}`, 'err') }
+      status('')
+    }
+
+    async function doBatch() {
+      status('Sending batch…')
+      try {
+        const res = await fetch(`${BASE}/graphql`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify([
+            { query: 'query GetUser { user(id: "1") { id name } }', operationName: 'GetUser' },
+            { query: 'query GetHello { hello }', operationName: 'GetHello' },
+          ]),
+        })
+        const data = await res.json()
+        log(`Batch OK: ${data.length} results`, 'ok')
+      } catch(e) { log(`Batch ERR: ${e}`, 'err') }
+      status('')
+    }
+
+    async function doPersisted() {
+      status('Sending persisted query…')
+      try {
+        const res = await fetch(`${BASE}/graphql`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            operationName: 'GetUser',
+            variables: { id: '1' },
+            extensions: { persistedQuery: { version: 1, sha256Hash: 'abc123' } },
+          }),
+        })
+        const data = await res.json()
+        log(`Persisted OK: ${JSON.stringify(data)}`, 'ok')
+      } catch(e) { log(`Persisted ERR: ${e}`, 'err') }
+      status('')
+    }
+
+    function doGetQuery() {
+      status('Sending GET query…')
+      const q = encodeURIComponent('query GetHello { hello }')
+      fetch(`${BASE}/graphql?query=${q}&operationName=GetHello`)
+        .then(r => r.json())
+        .then(d => { log(`GET query OK: ${JSON.stringify(d.data)}`, 'ok'); status('') })
+        .catch(e => { log(`GET query ERR: ${e}`, 'err'); status('') })
+    }
+
+    function doGetAPQ() {
+      status('Sending GET APQ…')
+      const ext = encodeURIComponent(JSON.stringify({ persistedQuery: { version: 1, sha256Hash: 'def456' } }))
+      fetch(`${BASE}/graphql?operationName=GetUser&extensions=${ext}`)
+        .then(r => r.json())
+        .then(d => { log(`APQ OK: ${JSON.stringify(d)}`, 'ok'); status('') })
+        .catch(e => { log(`APQ ERR: ${e}`, 'err'); status('') })
+    }
+
+    async function doError() {
+      status('Sending error query…')
+      try {
+        const res = await fetch(`${BASE}/graphql/error`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ query: 'query GetError { error }', operationName: 'GetError' }),
+        })
+        const data = await res.json()
+        log(`Error response: ${JSON.stringify(data.errors)}`, 'err')
+      } catch(e) { log(`Request ERR: ${e}`, 'err') }
+      status('')
+    }
+
+    // ── XHR ────────────────────────────────────────────────────────────────
+
+    function doXhr() {
+      status('Sending XHR query…')
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${BASE}/graphql`)
+      xhr.setRequestHeader('content-type', 'application/json')
+      xhr.onload = () => { log(`XHR OK: ${xhr.responseText.slice(0, 80)}`, 'ok'); status('') }
+      xhr.onerror = () => { log('XHR ERR', 'err'); status('') }
+      xhr.send(JSON.stringify({ query: 'query XhrGetUser { user(id: "2") { id name } }', operationName: 'XhrGetUser' }))
+    }
+
+    // ── WebSocket (graphql-ws) ──────────────────────────────────────────────
+
+    function doWsSubscribe() {
+      if (wsConn) { wsConn.close(); wsConn = null }
+      status('Connecting WS…')
+      const ws = new WebSocket(`${WS_BASE}/graphql/ws`, 'graphql-transport-ws')
+      wsConn = ws
+
+      ws.addEventListener('open', () => {
+        log('WS open', 'ok')
+        ws.send(JSON.stringify({ type: 'connection_init', payload: {} }))
+      })
+
+      ws.addEventListener('message', e => {
+        try {
+          const msg = JSON.parse(e.data)
+          if (msg.type === 'connection_ack') {
+            log('WS ack — sending subscribe', 'info')
+            ws.send(JSON.stringify({
+              id: '1',
+              type: 'subscribe',
+              payload: {
+                query: 'subscription Countdown { countdown(from: 3) }',
+                operationName: 'Countdown',
+              },
+            }))
+          } else if (msg.type === 'next') {
+            log(`WS next: ${JSON.stringify(msg.payload?.data)}`, 'ok')
+          } else if (msg.type === 'complete') {
+            log('WS subscription complete', 'info')
+            ws.close()
+            wsConn = null
+          }
+        } catch {}
+      })
+
+      ws.addEventListener('error', () => log('WS error', 'err'))
+      ws.addEventListener('close', () => { log('WS closed', 'info'); wsConn = null; status('') })
+    }
+
+    function stopWs() {
+      if (wsConn) { wsConn.close(); wsConn = null; log('WS stopped by user', 'info') }
+    }
+
+    // ── fetch-SSE (graphql-sse protocol) ──────────────────────────────────
+    // POST a subscription query — GraphLens sees the body, creates the row,
+    // then sse-start flips transport to SSE and frames start arriving.
+
+    async function doFetchSse() {
+      status('fetch-SSE connecting…')
+      try {
+        const res = await fetch(`${BASE}/graphql/stream`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'accept': 'text/event-stream',
+          },
+          body: JSON.stringify({
+            query: 'subscription Countdown { countdown(from: 3) }',
+            operationName: 'Countdown',
+          }),
+        })
+        if (!res.body) { log('No body', 'err'); return }
+        const reader = res.body.getReader()
+        const dec = new TextDecoder()
+        let buf = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += dec.decode(value, { stream: true })
+          const blocks = buf.split('\n\n')
+          buf = blocks.pop() ?? ''
+          for (const block of blocks) {
+            if (!block.trim()) continue
+            const dataLine = block.split('\n').find(l => l.startsWith('data:'))
+            if (dataLine) log(`SSE frame: ${dataLine.slice(5).trim()}`, 'ok')
+          }
+        }
+        log('fetch-SSE done', 'info')
+      } catch(e) { log(`fetch-SSE ERR: ${e}`, 'err') }
+      status('')
+    }
+
+    // ── Negative: plain WebSocket ───────────────────────────────────────────
+
+    function doPlainWs() {
+      const ws = new WebSocket(`${WS_BASE}/plain/ws`)
+      ws.addEventListener('open', () => log('[negative] plain WS open — should NOT show in GraphLens', 'info'))
+      ws.addEventListener('message', e => { log(`[negative] plain WS msg: ${e.data}`, 'info'); ws.close() })
+    }
+
+    // ── Negative: plain SSE ────────────────────────────────────────────────
+
+    function doPlainSse() {
+      status('plain SSE…')
+      fetch(`${BASE}/plain/sse`).then(async res => {
+        const reader = res.body.getReader()
+        const dec = new TextDecoder()
+        let buf = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += dec.decode(value, { stream: true })
+          const blocks = buf.split('\n\n')
+          buf = blocks.pop() ?? ''
+          for (const block of blocks) {
+            if (block.trim()) log(`[negative] plain SSE: ${block.trim()} — should NOT show in GraphLens`, 'info')
+          }
+        }
+        status('')
+      }).catch(e => { log(`plain SSE ERR: ${e}`, 'err'); status('') })
+    }
+  </script>
+</body>
+</html>

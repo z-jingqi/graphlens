@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import type { CapturedRequest, CapturedFrame, Classification } from '../lib/types'
 import type { SearchLocation } from '../search/types'
@@ -56,26 +56,77 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
   )
 }
 
+interface HeaderMenu { x: number; y: number; name: string; value: string }
+
+function HeaderContextMenu({ menu, onClose }: { menu: HeaderMenu; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onScroll = () => onClose()
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScroll, true)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onScroll, true)
+    }
+  }, [onClose])
+
+  const copy = (text: string) => { navigator.clipboard.writeText(text).catch(() => {}); onClose() }
+
+  return (
+    <div
+      ref={ref}
+      style={{ position: 'fixed', left: menu.x, top: menu.y, zIndex: 9999 }}
+      className="bg-popover border border-border rounded-md shadow-lg overflow-hidden py-1 min-w-44"
+    >
+      <button
+        onClick={() => copy(menu.value)}
+        className="block w-full px-2.5 py-1.5 text-left text-xs text-foreground hover:bg-accent transition-colors border-none bg-transparent cursor-pointer whitespace-nowrap"
+      >
+        Copy value
+      </button>
+      <button
+        onClick={() => copy(menu.name)}
+        className="block w-full px-2.5 py-1.5 text-left text-xs text-foreground hover:bg-accent transition-colors border-none bg-transparent cursor-pointer whitespace-nowrap"
+      >
+        Copy name
+      </button>
+    </div>
+  )
+}
+
 function HeadersGrid({ headers, findQuery = '' }: { headers: { name: string; value: string }[]; findQuery?: string }) {
+  const [menu, setMenu] = useState<HeaderMenu | null>(null)
+  const closeMenu = useCallback(() => setMenu(null), [])
+
   if (headers.length === 0) {
     return <span className="text-xs text-muted-foreground italic">(none)</span>
   }
   return (
-    <div className="flex flex-col">
-      {headers.map((h, i) => (
-        <div key={i} className="group flex items-start gap-x-2 rounded hover:bg-accent/40 -mx-1 px-1">
-          <div className="py-0.5 text-xs font-mono json-key truncate shrink-0" style={{ width: 160 }} title={h.name}>
-            <Highlighted text={h.name} query={findQuery} />
+    <>
+      <div className="flex flex-col">
+        {headers.map((h, i) => (
+          <div
+            key={i}
+            className="flex items-start gap-x-2 rounded hover:bg-accent/40 -mx-1 px-1 cursor-default"
+            onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY, name: h.name, value: h.value }) }}
+          >
+            <div className="py-0.5 text-xs font-mono json-key break-all shrink-0" style={{ width: 160 }} title={h.name}>
+              <Highlighted text={h.name} query={findQuery} />
+            </div>
+            <div className="py-0.5 text-xs font-mono text-foreground break-all whitespace-pre-wrap flex-1 min-w-0">
+              <Highlighted text={h.value} query={findQuery} />
+            </div>
           </div>
-          <div className="py-0.5 text-xs font-mono text-foreground break-all whitespace-pre-wrap flex-1 min-w-0">
-            <Highlighted text={h.value} query={findQuery} />
-          </div>
-          <div className="shrink-0 pt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <CopyIconButton text={h.value} title={`Copy ${h.name} value`} className="h-5 w-5" />
-          </div>
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+      {menu && <HeaderContextMenu menu={menu} onClose={closeMenu} />}
+    </>
   )
 }
 
@@ -171,7 +222,7 @@ function FrameRow({ frame, requestId, search }: { frame: CapturedFrame; requestI
         <span className="text-muted-foreground/60 font-mono shrink-0 ml-auto">{frame.data.length}B</span>
       </div>
       {expanded && (
-        <div className="mt-1.5 bg-muted/40 rounded-md p-2 overflow-x-hidden">
+        <div className="mt-1.5 bg-muted/40 rounded-md p-2 overflow-x-auto">
           {isJson
             ? <JsonTree
                 data={JSON.parse(frame.data)}
@@ -190,14 +241,14 @@ function FrameRow({ frame, requestId, search }: { frame: CapturedFrame; requestI
 
 // ── Subscription grouping ─────────────────────────────────────────────────────
 
-interface FrameGroup {
+export interface FrameGroup {
   key: string
   label: string
   subLabel?: string
   frames: { frame: CapturedFrame; index: number }[]
 }
 
-function buildGroups(frames: CapturedFrame[]): FrameGroup[] {
+export function buildGroups(frames: CapturedFrame[]): FrameGroup[] {
   const map = new Map<string, FrameGroup>()
 
   frames.forEach((frame, index) => {
@@ -243,7 +294,7 @@ function BatchQueryTab({ operations, requestId, findQuery }: {
           action={op.query ? <CopyIconButton text={op.query} title="Copy query" /> : undefined}
         >
           {op.query ? (
-            <div className="bg-muted/40 rounded-md p-2 overflow-x-hidden">
+            <div className="bg-muted/40 rounded-md p-2 overflow-x-auto">
               {findQuery
                 ? <pre className="font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-foreground">
                     <Highlighted text={op.query} query={findQuery} />
@@ -277,7 +328,7 @@ function BatchVariablesTab({ operations, requestId, findQuery }: {
           }
         >
           {op.variables !== undefined ? (
-            <div className="bg-muted/40 rounded-md p-2 overflow-x-hidden">
+            <div className="bg-muted/40 rounded-md p-2 overflow-x-auto">
               <JsonTree
                 data={op.variables}
                 cacheKey={`${requestId}:vars:${i}`}
@@ -439,7 +490,7 @@ export function DetailPanel({ request, onClose, jump, findNonce }: Props) {
     : null
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden min-w-0">
+    <div className="relative flex flex-col flex-1 overflow-hidden min-w-0">
       {/* ── Header band ──────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-3 py-2 bg-card border-b border-border shrink-0">
         <div className="flex flex-col min-w-0 flex-1 leading-tight">
@@ -503,20 +554,6 @@ export function DetailPanel({ request, onClose, jump, findNonce }: Props) {
         </div>
       )}
 
-      {/* ── Find bar ──────────────────────────────────────────────────────── */}
-      {findOpen && (
-        <DetailFindBar
-          query={findQuery}
-          currentIndex={findTotal === 0 ? 0 : ((findIndex % findTotal) + findTotal) % findTotal + 1}
-          total={findTotal}
-          focusTrigger={findNonce}
-          onChange={q => { setFindQuery(q); setFindIndex(0) }}
-          onPrev={onFindPrev}
-          onNext={onFindNext}
-          onClose={() => { setFindOpen(false); setFindQuery('') }}
-        />
-      )}
-
       {/* ── Content area ──────────────────────────────────────────────────── */}
       <div
         ref={contentRef}
@@ -542,7 +579,7 @@ export function DetailPanel({ request, onClose, jump, findNonce }: Props) {
                 <SectionLabel>GraphQL</SectionLabel>
                 <CopyIconButton text={c.query} title="Copy query" />
               </div>
-              <div className="bg-muted/40 rounded-md p-2 overflow-x-hidden overflow-y-auto flex-1 min-h-0">
+              <div className="bg-muted/40 rounded-md p-2 overflow-x-auto overflow-y-auto flex-1 min-h-0">
                 {findQuery
                   ? <pre className="font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-foreground m-0">
                       <Highlighted text={c.query} query={findQuery} />
@@ -569,7 +606,7 @@ export function DetailPanel({ request, onClose, jump, findNonce }: Props) {
                   <SectionLabel>JSON</SectionLabel>
                   <CopyIconButton text={JSON.stringify(c.variables, null, 2)} title="Copy variables" />
                 </div>
-                <div className="bg-muted/40 rounded-md p-2 overflow-x-hidden overflow-y-auto flex-1 min-h-0">
+                <div className="bg-muted/40 rounded-md p-2 overflow-x-auto overflow-y-auto flex-1 min-h-0">
                   <JsonTree
                     data={c.variables}
                     cacheKey={`${request.id}:vars`}
@@ -670,7 +707,7 @@ export function DetailPanel({ request, onClose, jump, findNonce }: Props) {
                 />
               )}
             </div>
-            <div className="bg-muted/40 rounded-md p-2 overflow-x-hidden overflow-y-auto flex-1 min-h-0">
+            <div className="bg-muted/40 rounded-md p-2 overflow-x-auto overflow-y-auto flex-1 min-h-0">
               {isPending
                 ? <span className="text-xs text-muted-foreground italic">Waiting for response…</span>
                 : responseJson !== undefined
@@ -738,6 +775,22 @@ export function DetailPanel({ request, onClose, jump, findNonce }: Props) {
         )}
 
       </div>
+
+      {/* ── Find bar — floating bottom-right overlay ───────────────────────── */}
+      {findOpen && (
+        <div className="absolute bottom-3 right-3 z-20">
+          <DetailFindBar
+            query={findQuery}
+            currentIndex={findTotal === 0 ? 0 : ((findIndex % findTotal) + findTotal) % findTotal + 1}
+            total={findTotal}
+            focusTrigger={findNonce}
+            onChange={q => { setFindQuery(q); setFindIndex(0) }}
+            onPrev={onFindPrev}
+            onNext={onFindNext}
+            onClose={() => { setFindOpen(false); setFindQuery('') }}
+          />
+        </div>
+      )}
     </div>
   )
 }

@@ -30,33 +30,44 @@ export function DetailFindBar({
   }, [focusTrigger])
 
   const onKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') { e.stopPropagation(); onClose() }
-    if (e.key === 'Enter') { e.shiftKey ? onPrev() : onNext() }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose() }
+    if (e.key === 'Enter') { e.preventDefault(); e.shiftKey ? onPrev() : onNext() }
+    // Prevent Cmd+F from bubbling to Chrome's native find when the bar is already open.
+    if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+      e.preventDefault()
+      e.stopPropagation()
+      inputRef.current?.select()
+    }
   }
 
-  const countLabel = !query ? '' : total === 0 ? 'No results' : `${currentIndex} / ${total}`
+  const noMatch = !!query && total === 0
+  const countLabel = !query ? '' : noMatch ? 'No results' : `${currentIndex} / ${total}`
 
   return (
-    <div className="flex items-center gap-1 px-2 py-1 bg-card border-b border-border shrink-0">
-      <input
-        ref={inputRef}
-        value={query}
-        onChange={e => onChange(e.target.value)}
-        onKeyDown={onKey}
-        placeholder="Find in panel…"
-        spellCheck={false}
-        className="h-6 w-44 rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-primary placeholder:text-muted-foreground"
-      />
-      <span className="text-xs text-muted-foreground tabular-nums shrink-0 min-w-[60px]">
-        {countLabel}
-      </span>
+    // Floating card — parent positions it absolute bottom-right.
+    <div className="flex items-center gap-1 px-2 py-1.5 bg-card border border-border rounded-lg shadow-lg">
+      <div className="relative">
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={e => onChange(e.target.value)}
+          onKeyDown={onKey}
+          placeholder="Find in panel…"
+          spellCheck={false}
+          className={`h-6 w-44 rounded-md border bg-background pl-2 text-xs outline-none focus:border-primary placeholder:text-muted-foreground ${noMatch ? 'border-destructive/60 pr-16' : 'border-border pr-10'}`}
+        />
+        {countLabel && (
+          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] tabular-nums text-muted-foreground/70 whitespace-nowrap">
+            {countLabel}
+          </span>
+        )}
+      </div>
       <button
         onClick={onPrev}
         disabled={total === 0}
         title="Previous (Shift+Enter)"
         className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors border-none bg-transparent cursor-pointer disabled:opacity-40 disabled:cursor-default"
       >
-        {/* up chevron */}
         <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
           <path d="M5 3 L1 8 L9 8 Z" />
         </svg>
@@ -67,7 +78,6 @@ export function DetailFindBar({
         title="Next (Enter)"
         className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors border-none bg-transparent cursor-pointer disabled:opacity-40 disabled:cursor-default"
       >
-        {/* down chevron */}
         <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
           <path d="M5 7 L1 2 L9 2 Z" />
         </svg>

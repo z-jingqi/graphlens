@@ -3,7 +3,30 @@ import clsx from 'clsx'
 import { copyToClipboard } from '../lib/copy'
 import { getCollapsed, setCollapsed as cacheSetCollapsed } from '../lib/jsonCollapseCache'
 import { Highlighted } from './Highlighted'
-import { dataContains } from '../search/match'
+import { dataContains, findMatches } from '../search/match'
+
+const STR_MAX = 100
+const SNIPPET_CTX = 30
+
+function getDisplayString(
+  data: string,
+  findQuery: string,
+): { display: string; before: boolean; after: boolean } {
+  if (!findQuery || data.length <= STR_MAX) {
+    return { display: data.slice(0, STR_MAX), before: false, after: data.length > STR_MAX }
+  }
+  const matches = findMatches(data, findQuery)
+  if (!matches.length) {
+    return { display: data.slice(0, STR_MAX), before: false, after: data.length > STR_MAX }
+  }
+  // Build a window that covers both the match START and END plus context on each side.
+  // This handles: match beyond truncation point, match spanning the truncation boundary,
+  // and match at the start whose end exceeds STR_MAX (e.g. searching the full string value).
+  const { start, end } = matches[0]
+  const from = Math.max(0, start - SNIPPET_CTX)
+  const to   = Math.min(data.length, Math.max(end + SNIPPET_CTX, from + STR_MAX))
+  return { display: data.slice(from, to), before: from > 0, after: to < data.length }
+}
 
 // ── Context menu ──────────────────────────────────────────────────────────────
 
@@ -136,6 +159,14 @@ function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
     return dataContains(data, findQuery)
   }, [findQuery, data])
 
+  // When a search match forces this node open, commit that to local state so it
+  // stays open after the find bar is closed (subtreeHasMatch → false, but
+  // collapsed is already false, so effectiveCollapsed stays false).
+  // Not written to the cache — this is search-driven, not a user toggle.
+  useEffect(() => {
+    if (subtreeHasMatch) setCollapsed(false)
+  }, [subtreeHasMatch])
+
   const effectiveCollapsed = collapsed && !subtreeHasMatch
 
   const ctxMenu = (e: React.MouseEvent) => {
@@ -161,13 +192,16 @@ function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
     </span>
   )
   if (typeof data === 'string') {
-    const truncated = data.length > 100
-    const display = truncated ? data.slice(0, 100) : data
+    const { display, before, after } = getDisplayString(data, findQuery)
     return (
       <span className="json-str">
-        &quot;{findQuery ? <Highlighted text={display} query={findQuery} /> : display}&quot;
-        {truncated && (
-          <span className="text-muted-foreground/60 text-[10px] ml-1">… {data.length.toLocaleString()} chars</span>
+        &quot;
+        {before && <span className="text-muted-foreground/60">…</span>}
+        {findQuery ? <Highlighted text={display} query={findQuery} /> : display}
+        {after  && <span className="text-muted-foreground/60">…</span>}
+        &quot;
+        {data.length > STR_MAX && (
+          <span className="text-muted-foreground/60 text-[10px] ml-1">{data.length.toLocaleString()} chars</span>
         )}
       </span>
     )
