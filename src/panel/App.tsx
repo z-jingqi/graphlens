@@ -28,6 +28,7 @@ export function App() {
   const [columnWidths, setColumnWidths] = useState<ColumnWidths>(settings.columnWidths)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchPanelWidth, setSearchPanelWidth] = useState(settings.searchPanelWidth)
+  const [detailFindNonce, setDetailFindNonce] = useState<number | undefined>(undefined)
   const [detailJump, setDetailJump] = useState<{
     requestId: string
     location: SearchLocation
@@ -40,11 +41,20 @@ export function App() {
 
   const search = useSearch(requests)
 
+  // Cmd/Ctrl+F: open in-panel find when a request is selected; otherwise open
+  // the global left-side search panel.
+  const selectedRef = useRef<CapturedRequest | null>(null)
+  selectedRef.current = selected
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
         e.preventDefault()
-        setSearchOpen(true)
+        if (selectedRef.current) {
+          // Detail panel is open — bump the nonce to trigger in-panel find.
+          setDetailFindNonce(n => (n ?? 0) + 1)
+        } else {
+          setSearchOpen(true)
+        }
       }
     }
     document.addEventListener('keydown', onKeyDown)
@@ -180,6 +190,7 @@ export function App() {
                 jump={detailJump?.requestId === selected.id
                   ? { location: detailJump.location, nonce: detailJump.nonce }
                   : undefined}
+                findNonce={detailFindNonce}
               />
             </div>
           </>

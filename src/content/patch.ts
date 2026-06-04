@@ -63,204 +63,238 @@
   }
 
   // ── fetch wrapper ─────────────────────────────────────────────────────────
-  const origFetch = window.fetch
-  if (typeof origFetch === 'function') {
-    window.fetch = function patchedFetch(this: unknown, input: RequestInfo | URL, init?: RequestInit) {
-      const id = newId()
-      const startedAt = Date.now()
+  try {
+    const origFetch = window.fetch
+    if (typeof origFetch === 'function') {
+      window.fetch = function patchedFetch(this: unknown, input: RequestInfo | URL, init?: RequestInit) {
+        let id = ''
+        const startedAt = Date.now()
 
-      let url = ''
-      let method = 'GET'
-      let body: string | undefined
+        try {
+          id = newId()
+          let url = ''
+          let method = 'GET'
+          let body: string | undefined
 
-      try {
-        if (typeof input === 'string') {
-          url = input
-        } else if (input instanceof URL) {
-          url = input.href
-        } else if (input && typeof (input as Request).url === 'string') {
-          url = (input as Request).url
-          method = (input as Request).method || method
-        }
-        if (init?.method) method = init.method
-        method = method.toUpperCase()
-        if (typeof init?.body === 'string') body = init.body
-        try { url = new URL(url, location.href).href } catch {}
-      } catch {}
-
-      post('started', { id, url, method, startedAt, body })
-
-      // eslint-disable-next-line prefer-rest-params
-      const promise = origFetch.apply(this, arguments as unknown as Parameters<typeof fetch>)
-      return promise.then(
-        (res: Response) => {
-          const ct = res.headers.get('content-type') ?? ''
-          if (ct.includes('text/event-stream') && res.body) {
-            // Mark as SSE before 'completed' so the panel can flip transport → 'sse'
-            // and the 'completed' handler will then treat status 200 as a handshake.
-            post('sse-start', { id })
-            post('completed', { id, status: res.status, durationMs: Date.now() - startedAt })
-            const [forCaller, forUs] = res.body.tee()
-            void pumpSse(forUs, id, startedAt)
-            return new Response(forCaller, {
-              status: res.status,
-              statusText: res.statusText,
-              headers: res.headers,
-            })
+          if (typeof input === 'string') {
+            url = input
+          } else if (input instanceof URL) {
+            url = input.href
+          } else if (input && typeof (input as Request).url === 'string') {
+            url = (input as Request).url
+            method = (input as Request).method || method
           }
-          post('completed', { id, status: res.status, durationMs: Date.now() - startedAt })
-          return res
-        },
-        (err: unknown) => {
-          post('completed', { id, status: 0, durationMs: Date.now() - startedAt, failed: true })
-          throw err
-        }
-      )
-    } as typeof window.fetch
-  }
+          if (init?.method) method = init.method
+          method = method.toUpperCase()
+          if (typeof init?.body === 'string') body = init.body
+          else if (init?.body instanceof URLSearchParams) body = init.body.toString()
+          try { url = new URL(url, location.href).href } catch {}
+
+          post('started', { id, url, method, startedAt, body })
+        } catch {}
+
+        // eslint-disable-next-line prefer-rest-params
+        const promise = origFetch.apply(this, arguments as unknown as Parameters<typeof fetch>)
+
+        return promise.then(
+          (res: Response) => {
+            try {
+              const ct = res.headers.get('content-type') ?? ''
+              if (ct.includes('text/event-stream') && res.body) {
+                post('sse-start', { id })
+                post('completed', { id, status: res.status, durationMs: Date.now() - startedAt })
+                const [forCaller, forUs] = res.body.tee()
+                void pumpSse(forUs, id, startedAt)
+                return new Response(forCaller, {
+                  status: res.status,
+                  statusText: res.statusText,
+                  headers: res.headers,
+                })
+              }
+              post('completed', { id, status: res.status, durationMs: Date.now() - startedAt })
+            } catch {
+              try { post('completed', { id, status: res.status, durationMs: Date.now() - startedAt }) } catch {}
+            }
+            return res
+          },
+          (err: unknown) => {
+            try { post('completed', { id, status: 0, durationMs: Date.now() - startedAt, failed: true }) } catch {}
+            throw err
+          }
+        )
+      } as typeof window.fetch
+    }
+  } catch {}
 
   // ── XHR wrapper ───────────────────────────────────────────────────────────
-  const XHR = window.XMLHttpRequest
-  if (typeof XHR === 'function') {
-    const origOpen = XHR.prototype.open
-    const origSend = XHR.prototype.send
+  try {
+    const XHR = window.XMLHttpRequest
+    if (typeof XHR === 'function') {
+      const origOpen = XHR.prototype.open
+      const origSend = XHR.prototype.send
 
-    XHR.prototype.open = function patchedOpen(
-      this: XMLHttpRequest & { __gqlInfo?: { method: string; url: string } },
-      method: string,
-      url: string | URL,
-      ...rest: unknown[]
-    ) {
-      let resolvedUrl = String(url)
-      try { resolvedUrl = new URL(resolvedUrl, location.href).href } catch {}
-      this.__gqlInfo = { method: (method || 'GET').toUpperCase(), url: resolvedUrl }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return origOpen.apply(this, [method, url, ...rest] as any)
-    } as typeof XHR.prototype.open
+      XHR.prototype.open = function patchedOpen(
+        this: XMLHttpRequest & { __gqlInfo?: { method: string; url: string } },
+        method: string,
+        url: string | URL,
+        ...rest: unknown[]
+      ) {
+        try {
+          let resolvedUrl = String(url)
+          try { resolvedUrl = new URL(resolvedUrl, location.href).href } catch {}
+          this.__gqlInfo = { method: (method || 'GET').toUpperCase(), url: resolvedUrl }
+        } catch {}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return origOpen.apply(this, [method, url, ...rest] as any)
+      } as typeof XHR.prototype.open
 
-    XHR.prototype.send = function patchedSend(
-      this: XMLHttpRequest & { __gqlInfo?: { method: string; url: string } },
-      body?: Document | XMLHttpRequestBodyInit | null
-    ) {
-      const info = this.__gqlInfo
-      if (info) {
-        const id = newId()
-        const startedAt = Date.now()
-        const bodyText = typeof body === 'string' ? body : undefined
+      XHR.prototype.send = function patchedSend(
+        this: XMLHttpRequest & { __gqlInfo?: { method: string; url: string } },
+        body?: Document | XMLHttpRequestBodyInit | null
+      ) {
+        try {
+          const info = this.__gqlInfo
+          if (info) {
+            const id = newId()
+            const startedAt = Date.now()
+            const bodyText = typeof body === 'string' ? body : undefined
 
-        post('started', { id, url: info.url, method: info.method, startedAt, body: bodyText })
+            post('started', { id, url: info.url, method: info.method, startedAt, body: bodyText })
 
-        const onDone = () => {
-          this.removeEventListener('loadend', onDone)
-          post('completed', {
-            id,
-            status: this.status,
-            durationMs: Date.now() - startedAt,
-            failed: this.status === 0,
-          })
-        }
-        this.addEventListener('loadend', onDone)
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return origSend.apply(this, arguments as any)
-    } as typeof XHR.prototype.send
-  }
+            const onDone = () => {
+              this.removeEventListener('loadend', onDone)
+              post('completed', {
+                id,
+                status: this.status,
+                durationMs: Date.now() - startedAt,
+                failed: this.status === 0,
+              })
+            }
+            this.addEventListener('loadend', onDone)
+          }
+        } catch {}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return origSend.apply(this, arguments as any)
+      } as typeof XHR.prototype.send
+    }
+  } catch {}
 
   // ── WebSocket wrapper ─────────────────────────────────────────────────────
-  const OrigWS = window.WebSocket
-  if (typeof OrigWS === 'function') {
-    const capFrame = (data: unknown): string => {
-      if (typeof data === 'string') {
-        return data.length > 65536 ? data.slice(0, 65536) + '…[truncated]' : data
+  try {
+    const OrigWS = window.WebSocket
+    if (typeof OrigWS === 'function') {
+      const capFrame = (data: unknown): string => {
+        if (typeof data === 'string') {
+          return data.length > 65536 ? data.slice(0, 65536) + '…[truncated]' : data
+        }
+        const size = data instanceof Blob ? data.size : (data as ArrayBuffer).byteLength ?? 0
+        return `[Binary ${size} bytes]`
       }
-      const size = data instanceof Blob ? data.size : (data as ArrayBuffer).byteLength ?? 0
-      return `[Binary ${size} bytes]`
+
+      class PatchedWebSocket extends OrigWS {
+        private readonly __id: string
+        private readonly __t0: number
+
+        constructor(url: string | URL, protocols?: string | string[]) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          super(url as string, protocols as any)
+          this.__id = ''
+          this.__t0 = 0
+          try {
+            this.__id = newId()
+            this.__t0 = Date.now()
+            const urlStr = typeof url === 'string' ? url : url.href
+            const protocolList = typeof protocols === 'string' ? [protocols]
+              : Array.isArray(protocols) ? protocols : []
+            post('started', { id: this.__id, url: urlStr, method: 'WS', startedAt: this.__t0, transport: 'websocket', protocols: protocolList })
+
+            super.addEventListener('open', () => {
+              post('completed', { id: this.__id, status: 101, durationMs: Date.now() - this.__t0 })
+            })
+            super.addEventListener('message', (e: MessageEvent) => {
+              post('frame', { id: this.__id, direction: 'receive', data: capFrame(e.data), timestamp: Date.now() })
+            })
+            super.addEventListener('close', () => {
+              post('disconnected', { id: this.__id, durationMs: Date.now() - this.__t0 })
+            })
+            super.addEventListener('error', () => {
+              post('disconnected', { id: this.__id, durationMs: Date.now() - this.__t0, failed: true })
+            })
+          } catch {}
+        }
+
+        send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
+          try { post('frame', { id: this.__id, direction: 'send', data: capFrame(data), timestamp: Date.now() }) } catch {}
+          super.send(data as string)
+        }
+      }
+
+      window.WebSocket = PatchedWebSocket as unknown as typeof WebSocket
     }
-
-    class PatchedWebSocket extends OrigWS {
-      private readonly __id: string
-      private readonly __t0: number
-
-      constructor(url: string | URL, protocols?: string | string[]) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        super(url as string, protocols as any)
-        this.__id = newId()
-        this.__t0 = Date.now()
-        const urlStr = typeof url === 'string' ? url : url.href
-        post('started', { id: this.__id, url: urlStr, method: 'WS', startedAt: this.__t0, transport: 'websocket' })
-
-        super.addEventListener('open', () => {
-          post('completed', { id: this.__id, status: 101, durationMs: Date.now() - this.__t0 })
-        })
-        super.addEventListener('message', (e: MessageEvent) => {
-          post('frame', { id: this.__id, direction: 'receive', data: capFrame(e.data), timestamp: Date.now() })
-        })
-        super.addEventListener('close', () => {
-          post('disconnected', { id: this.__id, durationMs: Date.now() - this.__t0 })
-        })
-        super.addEventListener('error', () => {
-          post('disconnected', { id: this.__id, durationMs: Date.now() - this.__t0, failed: true })
-        })
-      }
-
-      send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
-        post('frame', { id: this.__id, direction: 'send', data: capFrame(data), timestamp: Date.now() })
-        super.send(data as string)
-      }
-    }
-
-    window.WebSocket = PatchedWebSocket as unknown as typeof WebSocket
-  }
+  } catch {}
 
   // ── EventSource (SSE) wrapper ─────────────────────────────────────────────
-  const OrigES = window.EventSource
-  if (typeof OrigES === 'function') {
-    class PatchedEventSource extends OrigES {
-      private readonly __id: string
-      private readonly __t0: number
-      private readonly __seenEvents: Set<string>
+  try {
+    const OrigES = window.EventSource
+    if (typeof OrigES === 'function') {
+      // Captured before any Chrome DevTools wrapping — truly native listener registration.
+      const nativeOn = EventTarget.prototype.addEventListener
+      // Per-instance closure that tracks which custom event types we've registered.
+      const esTracker = new WeakMap<object, (type: string) => void>()
 
-      constructor(url: string | URL, init?: EventSourceInit) {
-        super(url as string, init)
-        this.__id = newId()
-        this.__t0 = Date.now()
-        this.__seenEvents = new Set()
-        const urlStr = typeof url === 'string' ? url : url.href
-        post('started', { id: this.__id, url: urlStr, method: 'GET', startedAt: this.__t0, transport: 'sse' })
+      class PatchedEventSource extends OrigES {
+        constructor(url: string | URL, init?: EventSourceInit) {
+          super(url as string, init)
+          try {
+            // All state in constructor-scoped locals — no class fields or prototype methods
+            // to avoid issues with Chrome DevTools Proxy wrapping and class field init order.
+            const id = newId()
+            const t0 = Date.now()
+            const seenEvents = new Set<string>(['message'])
+            const urlStr = typeof url === 'string' ? url : url.href
 
-        super.addEventListener('open', () => {
-          post('completed', { id: this.__id, status: 200, durationMs: Date.now() - this.__t0 })
-        })
-        super.addEventListener('error', () => {
-          if (this.readyState === EventSource.CLOSED) {
-            post('disconnected', { id: this.__id, durationMs: Date.now() - this.__t0, failed: true })
-          }
-        })
-        this.__trackEvent('message')
+            post('started', { id, url: urlStr, method: 'GET', startedAt: t0, transport: 'sse' })
+
+            nativeOn.call(this, 'open', () => {
+              post('completed', { id, status: 200, durationMs: Date.now() - t0 })
+            })
+            nativeOn.call(this, 'error', () => {
+              if (this.readyState === EventSource.CLOSED)
+                post('disconnected', { id, durationMs: Date.now() - t0, failed: true })
+            })
+            nativeOn.call(this, 'message', (e: Event) => {
+              if (e instanceof MessageEvent) {
+                const data = typeof e.data === 'string' && e.data.length > 65536
+                  ? e.data.slice(0, 65536) + '…[truncated]' : String(e.data)
+                post('frame', { id, direction: 'receive', data, timestamp: Date.now() })
+              }
+            })
+
+            const track = (type: string) => {
+              if (seenEvents.has(type)) return
+              seenEvents.add(type)
+              nativeOn.call(this, type, (e: Event) => {
+                if (e instanceof MessageEvent) {
+                  const data = typeof e.data === 'string' && e.data.length > 65536
+                    ? e.data.slice(0, 65536) + '…[truncated]' : String(e.data)
+                  post('frame', { id, direction: 'receive', data, eventName: type, timestamp: Date.now() })
+                }
+              })
+            }
+            esTracker.set(this, track)
+          } catch {}
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        addEventListener(type: string, listener: any, options?: any): void {
+          try { esTracker.get(this)?.(type) } catch {}
+          super.addEventListener(type, listener, options)
+        }
       }
 
-      private __trackEvent(type: string): void {
-        if (this.__seenEvents.has(type)) return
-        this.__seenEvents.add(type)
-        super.addEventListener(type, (e: Event) => {
-          if (e instanceof MessageEvent) {
-            const data = typeof e.data === 'string' && e.data.length > 65536
-              ? e.data.slice(0, 65536) + '…[truncated]'
-              : String(e.data)
-            post('frame', { id: this.__id, direction: 'receive', data, eventName: type === 'message' ? undefined : type, timestamp: Date.now() })
-          }
-        })
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      addEventListener(type: string, listener: any, options?: any): void {
-        this.__trackEvent(type)
-        super.addEventListener(type, listener, options)
-      }
+      window.EventSource = PatchedEventSource as unknown as typeof EventSource
     }
-
-    window.EventSource = PatchedEventSource as unknown as typeof EventSource
-  }
+  } catch {}
 
 })()
 

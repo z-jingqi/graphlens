@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "GraphLens - GraphQL Inspector",
-  "version": "1.0.0",
+  "name": "GraphQL Lens",
+  "version": "1.0.3",
   "description": "Inspect GraphQL traffic — HTTP, WebSocket, and SSE — with filtering, search, and full request details.",
   "icons": {
     "16": "icons/icon16.png",

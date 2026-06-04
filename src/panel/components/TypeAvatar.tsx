@@ -9,8 +9,8 @@ interface AvatarSpec {
 }
 
 const TRANSPORT_SPEC: Record<string, AvatarSpec> = {
-  websocket: { letter: 'W', title: 'WebSocket', fg: 'text-cyan-600 dark:text-cyan-400',      bg: 'bg-cyan-500/15 border-cyan-500/30' },
-  sse:       { letter: 'E', title: 'SSE',        fg: 'text-orange-600 dark:text-orange-400',  bg: 'bg-orange-500/15 border-orange-500/30' },
+  websocket: { letter: 'ws',  title: 'WebSocket', fg: 'text-cyan-600 dark:text-cyan-400',      bg: 'bg-cyan-500/15 border-cyan-500/30' },
+  sse:       { letter: 'sse', title: 'SSE',        fg: 'text-orange-600 dark:text-orange-400',  bg: 'bg-orange-500/15 border-orange-500/30' },
 }
 
 function specFor(req: CapturedRequest): AvatarSpec {
@@ -45,7 +45,8 @@ export function TypeAvatar({ req, variant = 'badge', className }: Props) {
     <span
       title={title}
       className={clsx(
-        'inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold border shrink-0',
+        'inline-flex items-center justify-center h-5 rounded-full text-[10px] font-bold border shrink-0',
+        letter.length > 1 ? 'px-1' : 'w-5',
         bg,
         fg,
         className

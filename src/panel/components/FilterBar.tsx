@@ -78,7 +78,7 @@ export function FilterBar({
   }, [inputVal])
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 bg-card border-b border-border shrink-0">
+    <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 bg-card border-b border-border shrink-0">
       <button
         onClick={() => onRecordingChange(!recording)}
         title={recording ? 'Stop recording' : 'Start recording'}

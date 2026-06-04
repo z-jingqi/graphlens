@@ -28,7 +28,8 @@ export function applyFilter(requests: CapturedRequest[], f: FilterState): Captur
   return requests.filter(req => {
     if (f.requestTypes.size > 0 && !f.requestTypes.has(req.transport ?? req.classification.type)) return false
 
-    if (f.opTypes.size > 0 && req.classification.type === 'graphql') {
+    if (f.opTypes.size > 0) {
+      if (req.classification.type !== 'graphql') return false
       if (!req.classification.operationType || !f.opTypes.has(req.classification.operationType))
         return false
     }

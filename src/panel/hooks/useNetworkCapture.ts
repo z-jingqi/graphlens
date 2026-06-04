@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import type { CapturedRequest, CapturedFrame, HarEntry, Transport } from '../lib/types'
-import { classifyBody, classifyFrame } from '../lib/detect'
+import { classify, classifyAll, classifyFrame, isGraphqlWsProtocol, parseGraphqlWsMeta } from '../lib/detect'
 import { findPendingMatch } from '../lib/correlate'
 
 const MAX_FRAMES = 1000
@@ -14,6 +14,7 @@ interface PendingStartedMsg {
   startedAt: number
   body?: string
   transport?: Transport
+  protocols?: string[]  // WebSocket subprotocols negotiated at connect time
 }
 
 interface PendingCompletedMsg {
@@ -57,6 +58,13 @@ export function useNetworkCapture(clearOnNavigate: boolean, recording: boolean) 
   requestsRef.current = requests
   const recordingRef = useRef(recording)
   recordingRef.current = recording
+  // Buffer SSE/WS started messages; only promote to a visible row when a graphql frame arrives.
+  const sseBuffer = useRef<Map<string, PendingStartedMsg>>(new Map())
+  // WebSockets without a GraphQL subprotocol are buffered here until a graphql-ws
+  // operation frame (subscribe / start) confirms the connection is GraphQL-based.
+  const wsBuffer = useRef<Map<string, PendingStartedMsg>>(new Map())
+  // Ensures getHAR() backfill only runs once per panel session.
+  const harBackfilled = useRef(false)
 
   // ── HAR finished requests ────────────────────────────────────────────────
   useEffect(() => {
@@ -68,7 +76,7 @@ export function useNetworkCapture(clearOnNavigate: boolean, recording: boolean) 
       if (rt && rt !== 'xhr' && rt !== 'fetch' && rt !== 'websocket') return
       har.getContent((body, encoding) => {
         const bodyText = encoding === 'base64' ? undefined : (body || undefined)
-        const classification = classifyBody(har.request.postData?.text)
+        const classification = classify(har.request.url, har.request.postData?.text)
 
         let responseJson: unknown
         let hasErrors = false
@@ -113,6 +121,7 @@ export function useNetworkCapture(clearOnNavigate: boolean, recording: boolean) 
           }
           // No pending match — create a new row (only reached for graphql, guarded above).
           if (classification === null) return prev
+          const allOps = classifyAll(har.request.postData?.text)
           const captured: CapturedRequest = {
             id: `har-${har.startedDateTime}-${har.request.url}-${Math.random().toString(36).slice(2, 8)}`,
             state: 'finished',
@@ -127,10 +136,25 @@ export function useNetworkCapture(clearOnNavigate: boolean, recording: boolean) 
             timestamp: startedAt,
             duration: Math.round(har.time),
             status: har.response.status,
+            ...(allOps.length > 1 ? { operations: allOps } : {}),
           }
           return [...prev, captured]
         })
       })
+    }
+
+    // Backfill HTTP requests that completed before the panel was opened.
+    // getHAR() returns all entries since page load; the handler's existing
+    // classify + findPendingMatch logic deduplicates any overlap with live events.
+    // Response bodies are not available for pre-panel requests (Chrome limitation)
+    // but URL, method, status, headers, and postData (query) are all present.
+    if (!harBackfilled.current) {
+      harBackfilled.current = true
+      try {
+        chrome.devtools.network.getHAR(harLog => {
+          harLog.entries.forEach(e => handler(e as unknown))
+        })
+      } catch {}
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -155,11 +179,26 @@ export function useNetworkCapture(clearOnNavigate: boolean, recording: boolean) 
       if (!recordingRef.current) return
 
       if (msg.kind === 'started') {
+        // SSE: buffer and only show once a graphql frame arrives.
+        if (msg.transport === 'sse') {
+          sseBuffer.current.set(msg.id, msg)
+          return
+        }
+
+        // WebSocket without a known GraphQL subprotocol: buffer until a graphql-ws
+        // operation frame (subscribe / start) confirms this is a GraphQL connection.
+        // WebSocket with a GraphQL subprotocol (graphql-transport-ws / graphql-ws):
+        // show immediately so the developer sees "Connecting → Open" in real time.
+        if (msg.transport === 'websocket' && !isGraphqlWsProtocol(msg.protocols)) {
+          wsBuffer.current.set(msg.id, msg)
+          return
+        }
+
         setRequests(prev => {
           if (prev.some(r => r.id === msg.id)) return prev
 
-          // WS/SSE: always track (may carry GraphQL, and useful on their own).
-          if (msg.transport === 'websocket' || msg.transport === 'sse') {
+          // WebSocket with confirmed GraphQL subprotocol: track immediately.
+          if (msg.transport === 'websocket') {
             const captured: CapturedRequest = {
               id: msg.id,
               state: 'pending',
@@ -177,9 +216,10 @@ export function useNetworkCapture(clearOnNavigate: boolean, recording: boolean) 
           }
 
           // HTTP (fetch/XHR): only track if it looks like GraphQL.
-          const classification = classifyBody(msg.body)
+          const classification = classify(msg.url, msg.body)
           if (classification === null) return prev
 
+          const allOps = classifyAll(msg.body)
           const captured: CapturedRequest = {
             id: msg.id,
             state: 'pending',
@@ -192,6 +232,7 @@ export function useNetworkCapture(clearOnNavigate: boolean, recording: boolean) 
             timestamp: msg.startedAt,
             duration: 0,
             status: 0,
+            ...(allOps.length > 1 ? { operations: allOps } : {}),
           }
           return [...prev, captured]
         })
@@ -219,23 +260,63 @@ export function useNetworkCapture(clearOnNavigate: boolean, recording: boolean) 
           })
         )
       } else if (msg.kind === 'frame') {
-        setRequests(prev =>
-          prev.map(r => {
+        const frameClassification = classifyFrame(msg.data)
+        // Promote a buffered SSE or WS connection to a visible row when the first
+        // graphql operation frame confirms it is a GraphQL connection.
+        const bufferedSse = frameClassification ? sseBuffer.current.get(msg.id) : undefined
+        const bufferedWs  = frameClassification ? wsBuffer.current.get(msg.id)  : undefined
+        if (bufferedSse) sseBuffer.current.delete(msg.id)
+        if (bufferedWs)  wsBuffer.current.delete(msg.id)
+        const buffered = bufferedSse ?? bufferedWs
+
+        setRequests(prev => {
+          const exists = prev.some(r => r.id === msg.id)
+
+          if (!exists && buffered && frameClassification) {
+            const wsMeta = parseGraphqlWsMeta(msg.data)
+            const frame: CapturedFrame = {
+              direction: msg.direction,
+              timestamp: msg.timestamp,
+              data: msg.data,
+              eventName: msg.eventName,
+              classification: frameClassification,
+              correlationId: wsMeta.id,
+              messageType: wsMeta.type,
+            }
+            const newRow: CapturedRequest = {
+              id: buffered.id,
+              state: 'open',
+              url: buffered.url,
+              method: buffered.method,
+              startedAt: buffered.startedAt,
+              classification: frameClassification,
+              transport: buffered.transport as Transport,
+              hasErrors: false,
+              timestamp: buffered.startedAt,
+              duration: 0,
+              status: 0,
+              frames: [frame],
+            }
+            return [...prev, newRow]
+          }
+
+          return prev.map(r => {
             if (r.id !== msg.id) return r
-            const frameClassification = classifyFrame(msg.data)
+            const wsMeta = parseGraphqlWsMeta(msg.data)
             const frame: CapturedFrame = {
               direction: msg.direction,
               timestamp: msg.timestamp,
               data: msg.data,
               eventName: msg.eventName,
               classification: frameClassification ?? undefined,
+              correlationId: wsMeta.id,
+              messageType: wsMeta.type,
             }
             const existing = r.frames ?? []
             const frames = existing.length >= MAX_FRAMES
               ? [...existing.slice(1), frame]
               : [...existing, frame]
 
-            // Promote parent to graphql if a frame is classified as GraphQL
             let classification = r.classification
             if (frameClassification !== null && classification.type !== 'graphql') {
               classification = frameClassification
@@ -243,8 +324,10 @@ export function useNetworkCapture(clearOnNavigate: boolean, recording: boolean) 
 
             return { ...r, frames, classification }
           })
-        )
+        })
       } else if (msg.kind === 'disconnected') {
+        sseBuffer.current.delete(msg.id)
+        wsBuffer.current.delete(msg.id)
         setRequests(prev =>
           prev.map(r =>
             r.id === msg.id

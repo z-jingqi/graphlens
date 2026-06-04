@@ -1,6 +1,9 @@
-import { useState, useEffect, useRef, createContext, useContext } from 'react'
+import { useState, useEffect, useRef, createContext, useContext, useMemo } from 'react'
 import clsx from 'clsx'
 import { copyToClipboard } from '../lib/copy'
+import { getCollapsed, setCollapsed as cacheSetCollapsed } from '../lib/jsonCollapseCache'
+import { Highlighted } from './Highlighted'
+import { dataContains } from '../search/match'
 
 // ── Context menu ──────────────────────────────────────────────────────────────
 
@@ -16,6 +19,14 @@ interface MenuCtxValue {
 }
 
 const MenuCtx = createContext<MenuCtxValue>({ openMenu: () => {} })
+
+// ── Collapse cache context ────────────────────────────────────────────────────
+
+const CollapseCtx = createContext<string | undefined>(undefined)
+
+// ── Find / search context (query string, empty = inactive) ────────────────────
+
+const FindCtx = createContext<string>('')
 
 function primitiveText(value: unknown): string {
   if (value === null) return 'null'
@@ -107,8 +118,25 @@ function isExpandable(val: unknown): boolean {
 
 function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
   const { openMenu } = useContext(MenuCtx)
-  const [collapsed, setCollapsed] = useState(depth > 2)
-  const toggle = () => setCollapsed(c => !c)
+  const cacheKey = useContext(CollapseCtx)
+  const findQuery = useContext(FindCtx)
+
+  const [collapsed, setCollapsed] = useState(() =>
+    cacheKey ? getCollapsed(cacheKey, path, depth) : depth > 2
+  )
+  const toggle = () => setCollapsed(c => {
+    const next = !c
+    if (cacheKey) cacheSetCollapsed(cacheKey, path, next)
+    return next
+  })
+
+  // When find is active and this node's subtree contains a match, force-expand it.
+  const subtreeHasMatch = useMemo(() => {
+    if (!findQuery || !isExpandable(data)) return false
+    return dataContains(data, findQuery)
+  }, [findQuery, data])
+
+  const effectiveCollapsed = collapsed && !subtreeHasMatch
 
   const ctxMenu = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -117,15 +145,27 @@ function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
   }
 
   // ── Primitives ────────────────────────────────────────────────────────────
-  if (data === null) return <span className="json-null">null</span>
-  if (typeof data === 'boolean') return <span className="json-bool">{String(data)}</span>
-  if (typeof data === 'number') return <span className="json-num">{data}</span>
+  if (data === null) return (
+    <span className="json-null">
+      {findQuery ? <Highlighted text="null" query={findQuery} /> : 'null'}
+    </span>
+  )
+  if (typeof data === 'boolean') return (
+    <span className="json-bool">
+      {findQuery ? <Highlighted text={String(data)} query={findQuery} /> : String(data)}
+    </span>
+  )
+  if (typeof data === 'number') return (
+    <span className="json-num">
+      {findQuery ? <Highlighted text={String(data)} query={findQuery} /> : data}
+    </span>
+  )
   if (typeof data === 'string') {
     const truncated = data.length > 100
     const display = truncated ? data.slice(0, 100) : data
     return (
       <span className="json-str">
-        &quot;{display}&quot;
+        &quot;{findQuery ? <Highlighted text={display} query={findQuery} /> : display}&quot;
         {truncated && (
           <span className="text-muted-foreground/60 text-[10px] ml-1">… {data.length.toLocaleString()} chars</span>
         )}
@@ -158,8 +198,19 @@ function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
     )
   }
 
+  const renderKeyLabel = (label: string, isIdx: boolean) => {
+    if (isIdx) {
+      return (
+        <><span className="text-muted-foreground">{label}</span><span className="text-muted-foreground">:&nbsp;</span></>
+      )
+    }
+    return (
+      <><span className="json-key">&quot;{findQuery ? <Highlighted text={label} query={findQuery} /> : label}&quot;</span><span className="text-muted-foreground">:&nbsp;</span></>
+    )
+  }
+
   // ── Collapsed ─────────────────────────────────────────────────────────────
-  if (collapsed) {
+  if (effectiveCollapsed) {
     return (
       <div
         className="flex items-center gap-1 h-[25px] cursor-pointer rounded hover:bg-accent/50 -mx-1 px-1"
@@ -167,11 +218,7 @@ function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
         onContextMenu={ctxMenu}
       >
         <Triangle open={false} />
-        {keyLabel !== undefined && (
-          /^\d+$/.test(keyLabel)
-            ? <><span className="text-muted-foreground">{keyLabel}</span><span className="text-muted-foreground">:&nbsp;</span></>
-            : <><span className="json-key">&quot;{keyLabel}&quot;</span><span className="text-muted-foreground">:&nbsp;</span></>
-        )}
+        {keyLabel !== undefined && renderKeyLabel(keyLabel, /^\d+$/.test(keyLabel))}
         <span className="text-muted-foreground">
           {openBr}<span className="text-[10px]">…</span>{closeBr}
         </span>
@@ -190,11 +237,7 @@ function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
         onContextMenu={ctxMenu}
       >
         <Triangle open={true} />
-        {keyLabel !== undefined && (
-          /^\d+$/.test(keyLabel)
-            ? <><span className="text-muted-foreground">{keyLabel}</span><span className="text-muted-foreground">:&nbsp;</span></>
-            : <><span className="json-key">&quot;{keyLabel}&quot;</span><span className="text-muted-foreground">:&nbsp;</span></>
-        )}
+        {keyLabel !== undefined && renderKeyLabel(keyLabel, /^\d+$/.test(keyLabel))}
         <span className="text-muted-foreground">{openBr}</span>
         <span className="text-[10px] text-muted-foreground/60">{summary}</span>
       </div>
@@ -225,7 +268,7 @@ function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
               <span className="w-3.5 shrink-0" />
               {isIndex
                 ? <><span className="text-muted-foreground">{key}</span><span className="text-muted-foreground">:&nbsp;</span></>
-                : <><span className="json-key">&quot;{key}&quot;</span><span className="text-muted-foreground">:&nbsp;</span></>
+                : <><span className="json-key">&quot;{findQuery ? <Highlighted text={key} query={findQuery} /> : key}&quot;</span><span className="text-muted-foreground">:&nbsp;</span></>
               }
               <JsonNode data={val} depth={depth + 1} path={kPath} />
               {hasComma && <span className="text-muted-foreground">,</span>}
@@ -244,7 +287,7 @@ function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
 
 // ── Public export ─────────────────────────────────────────────────────────────
 
-export function JsonTree({ data }: { data: unknown }) {
+export function JsonTree({ data, cacheKey, search }: { data: unknown; cacheKey?: string; search?: string }) {
   const [menu, setMenu] = useState<MenuState | null>(null)
 
   const openMenu = (e: React.MouseEvent, value: unknown, path: string) => {
@@ -253,9 +296,13 @@ export function JsonTree({ data }: { data: unknown }) {
 
   return (
     <MenuCtx.Provider value={{ openMenu }}>
-      <div className="font-mono text-xs leading-6">
-        <JsonNode data={data} depth={0} path="" />
-      </div>
+      <CollapseCtx.Provider value={cacheKey}>
+        <FindCtx.Provider value={search ?? ''}>
+          <div className="font-mono text-xs leading-6">
+            <JsonNode key={cacheKey} data={data} depth={0} path="" />
+          </div>
+        </FindCtx.Provider>
+      </CollapseCtx.Provider>
       {menu && <JsonContextMenu menu={menu} onClose={() => setMenu(null)} />}
     </MenuCtx.Provider>
   )

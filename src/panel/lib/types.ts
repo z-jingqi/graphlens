@@ -47,6 +47,10 @@ export interface CapturedFrame {
   data: string
   eventName?: string
   classification?: Classification
+  /** graphql-ws protocol id — correlates subscribe/next/complete messages. */
+  correlationId?: string
+  /** graphql-ws message type: 'subscribe' | 'next' | 'complete' | 'error' | etc. */
+  messageType?: string
 }
 
 export interface CapturedRequest {
@@ -66,6 +70,8 @@ export interface CapturedRequest {
   duration: number           // for pending: 0 until completed/HAR; then ms
   status: number             // 0 while pending
   frames?: CapturedFrame[]   // WS frames and SSE events (capped at 1000)
+  /** All operations from a batched request (only set when batch length > 1). */
+  operations?: Classification[]
 }
 
 export interface FilterState {
