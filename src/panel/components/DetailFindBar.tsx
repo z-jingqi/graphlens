@@ -22,12 +22,28 @@ export function DetailFindBar({
   onClose,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const suffixRef = useRef<HTMLSpanElement>(null)
 
   // Focus on mount and whenever focusTrigger changes (repeat Cmd+F press).
   useEffect(() => {
     inputRef.current?.focus()
     inputRef.current?.select()
   }, [focusTrigger])
+
+  // Keep input right-padding in sync with the suffix label's rendered width so
+  // typed text never overlaps the count or "No results" label.
+  useEffect(() => {
+    const input = inputRef.current
+    const suffix = suffixRef.current
+    if (!input) return
+    if (!suffix) {
+      input.style.paddingRight = '8px'
+      return
+    }
+    const w = suffix.getBoundingClientRect().width
+    // 8px gap + suffix width + 8px right inset
+    input.style.paddingRight = `${Math.ceil(w) + 16}px`
+  })
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose() }
@@ -54,10 +70,13 @@ export function DetailFindBar({
           onKeyDown={onKey}
           placeholder="Find in panel…"
           spellCheck={false}
-          className={`h-6 w-44 rounded-md border bg-background pl-2 text-xs outline-none focus:border-primary placeholder:text-muted-foreground ${noMatch ? 'border-destructive/60 pr-16' : 'border-border pr-10'}`}
+          className={`h-6 w-44 rounded-md border bg-background pl-2 text-xs outline-none focus:border-primary placeholder:text-muted-foreground ${noMatch ? 'border-destructive/60' : 'border-border'}`}
         />
         {countLabel && (
-          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] tabular-nums text-muted-foreground/70 whitespace-nowrap">
+          <span
+            ref={suffixRef}
+            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] tabular-nums text-muted-foreground/70 whitespace-nowrap"
+          >
             {countLabel}
           </span>
         )}

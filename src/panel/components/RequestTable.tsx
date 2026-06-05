@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useMemo } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import clsx from 'clsx'
 import type { CapturedRequest } from '../lib/types'
@@ -29,7 +29,6 @@ interface Props {
 const PADDING_LEFT = 12  // tailwind px-3
 const GAP = 8            // tailwind gap-2
 const MIN_COL = 60
-const MAX_COL = 1000
 
 function statusColorClass(code: number): string {
   if (code >= 500) return 'text-destructive'
@@ -125,7 +124,7 @@ function RequestRow({
 interface BoundarySpec {
   leftKey: keyof ColumnWidths
   rightKey: keyof ColumnWidths
-  left: number          // pixel position of the boundary in container coords
+  left: number
 }
 
 function ResizeHandle({
@@ -145,7 +144,7 @@ function ResizeHandle({
     const startX = e.clientX
     const startLeft = columnWidths[boundary.leftKey]
     const startRight = columnWidths[boundary.rightKey]
-    const totalAdjustable = startLeft + startRight   // these two columns share this space
+    const totalAdjustable = startLeft + startRight
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
 
@@ -207,11 +206,13 @@ export function RequestTable({
   const needsTick = requests.some(r => (r.state === 'pending' && r.status === 0) || r.state === 'open')
   useTick(needsTick, 250)
 
-  // ── Auto-scroll to newest request (debounced 300ms) ─────────────────
+  // ── Auto-scroll to newest request ───────────────────────────────────────
   const virtuoso = useRef<VirtuosoHandle>(null)
   const followingRef = useRef(true)
   const lastScrollTop = useRef(0)
   const scrollTimer = useRef<number | null>(null)
+  const requestsLenRef = useRef(requests.length)
+  requestsLenRef.current = requests.length
 
   useEffect(() => {
     if (requests.length === 0) return
@@ -230,8 +231,38 @@ export function RequestTable({
     }
   }, [requests.length])
 
-  const template = gridTemplate(columnWidths, detailOpen)
+  // When the panel becomes visible again, snap to the newest row if following.
+  useEffect(() => {
+    const onShown = () => {
+      if (followingRef.current && requestsLenRef.current > 0) {
+        virtuoso.current?.scrollToIndex({
+          index: requestsLenRef.current - 1,
+          align: 'end',
+          behavior: 'auto',
+        })
+      }
+    }
+    window.addEventListener('graphlens:shown', onShown)
+    return () => window.removeEventListener('graphlens:shown', onShown)
+  }, [])
 
+  // ── Locate-selected pill ─────────────────────────────────────────────────
+  const [visibleRange, setVisibleRange] = useState({ startIndex: 0, endIndex: 0 })
+
+  const selectedIndex = useMemo(
+    () => (selected ? requests.findIndex(r => r.id === selected.id) : -1),
+    [requests, selected]
+  )
+
+  const showLocate =
+    !!selected &&
+    requests.length > 100 &&
+    selectedIndex >= 0 &&
+    (selectedIndex < visibleRange.startIndex || selectedIndex > visibleRange.endIndex)
+
+  const above = showLocate && selectedIndex < visibleRange.startIndex
+
+  const template = gridTemplate(columnWidths, detailOpen)
   const boundaries = !detailOpen && requests.length > 0 ? computeBoundaries(columnWidths) : []
 
   return (
@@ -263,7 +294,15 @@ export function RequestTable({
             </button>
           </div>
         ) : (
-          <div className="flex-1" />
+          <div className="flex-1 flex flex-col items-center justify-center gap-1.5 text-xs text-muted-foreground px-6 text-center">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" className="opacity-40 mb-1">
+              <circle cx="9" cy="9" r="6" />
+              <line x1="13.5" y1="13.5" x2="17" y2="17" />
+              <line x1="7" y1="9" x2="11" y2="9" />
+            </svg>
+            <span className="font-medium">No matching requests</span>
+            <span className="text-muted-foreground/70">Try adjusting or clearing the filters</span>
+          </div>
         )
       ) : (
         <Virtuoso
@@ -274,6 +313,7 @@ export function RequestTable({
           atBottomStateChange={atBottom => {
             if (atBottom) followingRef.current = true
           }}
+          rangeChanged={setVisibleRange}
           scrollerRef={el => {
             if (el instanceof HTMLElement && el.dataset.scrollBound !== '1') {
               el.dataset.scrollBound = '1'
@@ -303,7 +343,7 @@ export function RequestTable({
         />
       )}
 
-      {/* Full-height resize handles overlay — drag from any row */}
+      {/* Full-height resize handles overlay */}
       {boundaries.length > 0 && (
         <div className="absolute inset-0 pointer-events-none z-20">
           {boundaries.map(b => (
@@ -316,6 +356,30 @@ export function RequestTable({
             />
           ))}
         </div>
+      )}
+
+      {/* Locate-selected pill — floats at top/bottom pointing toward the selected row */}
+      {showLocate && (
+        <button
+          onClick={() =>
+            virtuoso.current?.scrollToIndex({ index: selectedIndex, align: 'center', behavior: 'auto' })
+          }
+          title="Scroll to selected request"
+          className={clsx(
+            'absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 max-w-[80%]',
+            'px-2.5 py-1 rounded-full shadow-lg border-none cursor-pointer transition-all',
+            'bg-primary text-primary-foreground text-xs font-medium hover:brightness-110',
+            above ? 'top-8' : 'bottom-3'
+          )}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" className="shrink-0">
+            {above
+              ? <path d="M5 2 L9 7 L1 7 Z" />
+              : <path d="M5 8 L1 3 L9 3 Z" />
+            }
+          </svg>
+          <span className="truncate">{rowName(selected!)}</span>
+        </button>
       )}
     </div>
   )

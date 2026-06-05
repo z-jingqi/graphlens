@@ -36,6 +36,14 @@ export function App() {
   } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // ── Per-request find state ───────────────────────────────────────────────
+  // Keyed by request id. Only {open, query} are lifted here; the heavier
+  // match logic (index, total, DOM marks) stays local in DetailPanel.
+  const [findStates, setFindStates] = useState<Record<string, { open: boolean; query: string }>>({})
+  const curFind = selectedId
+    ? (findStates[selectedId] ?? { open: false, query: '' })
+    : { open: false, query: '' }
+
   const filtered = useMemo(() => applyFilter(requests, filter), [requests, filter])
   const selected = selectedId ? (filtered.find(r => r.id === selectedId) ?? null) : null
 
@@ -51,7 +59,10 @@ export function App() {
         e.preventDefault()
         e.stopImmediatePropagation()
         if (selectedRef.current) {
-          // Detail panel is open — bump the nonce to trigger in-panel find.
+          const id = selectedRef.current.id
+          // Open (or keep open) this request's find bar, preserving any existing query.
+          setFindStates(p => ({ ...p, [id]: { open: true, query: p[id]?.query ?? '' } }))
+          // Bump nonce to re-focus/select the input inside DetailPanel.
           setDetailFindNonce(n => (n ?? 0) + 1)
         } else {
           setSearchOpen(true)
@@ -70,6 +81,7 @@ export function App() {
   const handleClear = () => {
     clear()
     setSelectedId(null)
+    setFindStates({})
   }
 
   const handleSearchHitClick = (requestId: string, location: SearchLocation) => {
@@ -193,6 +205,14 @@ export function App() {
                   ? { location: detailJump.location, nonce: detailJump.nonce }
                   : undefined}
                 findNonce={detailFindNonce}
+                findOpen={curFind.open}
+                findQuery={curFind.query}
+                onFindQueryChange={q =>
+                  setFindStates(p => ({ ...p, [selected.id]: { open: true, query: q } }))
+                }
+                onFindClose={() =>
+                  setFindStates(p => ({ ...p, [selected.id]: { open: false, query: '' } }))
+                }
               />
             </div>
           </>

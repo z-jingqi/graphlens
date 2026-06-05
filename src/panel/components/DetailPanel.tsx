@@ -14,11 +14,38 @@ import clsx from 'clsx'
 
 type Tab = 'query' | 'variables' | 'response' | 'headers' | 'messages' | 'eventstream'
 
+// ── Debounced find query ──────────────────────────────────────────────────────
+// Mirrors the 150 ms debounce used by the global search (useSearch.ts), but
+// applies immediately when the request changes so there's no stale-query flash
+// when switching between requests.
+const FIND_DEBOUNCE_MS = 150
+
+function useDebouncedFind(value: string, resetKey: string, delayMs: number): string {
+  const [debounced, setDebounced] = useState(value)
+  const keyRef = useRef(resetKey)
+  useEffect(() => {
+    if (keyRef.current !== resetKey) {
+      // Request switched → apply instantly, skip the debounce timer.
+      keyRef.current = resetKey
+      setDebounced(value)
+      return
+    }
+    const id = window.setTimeout(() => setDebounced(value), delayMs)
+    return () => window.clearTimeout(id)
+  }, [value, resetKey, delayMs])
+  return debounced
+}
+
 interface Props {
   request: CapturedRequest
   onClose: () => void
   jump?: { location: SearchLocation; nonce: number }
-  findNonce?: number  // bumped by App on each Cmd+F press when detail is open
+  findNonce?: number        // bumped by App on each Cmd+F press; drives input focus/select
+  // Per-request find state — lifted to App so it survives request switches and panel remounts.
+  findOpen: boolean
+  findQuery: string
+  onFindQueryChange: (q: string) => void
+  onFindClose: () => void
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -346,7 +373,14 @@ function BatchVariablesTab({ operations, requestId, findQuery }: {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function DetailPanel({ request, onClose, jump, findNonce }: Props) {
+export function DetailPanel({
+  request, onClose, jump, findNonce,
+  findOpen, findQuery: rawFindQuery, onFindQueryChange, onFindClose,
+}: Props) {
+  // rawFindQuery changes on every keystroke (drives the controlled input).
+  // findQuery is debounced — drives highlights, mark-counting, and scroll.
+  const findQuery = useDebouncedFind(rawFindQuery, request.id, FIND_DEBOUNCE_MS)
+
   const { classification: c, har, responseJson, responseBody } = request
   const isWsLike = request.transport === 'websocket'
   const isSse = request.transport === 'sse'
@@ -360,21 +394,16 @@ export function DetailPanel({ request, onClose, jump, findNonce }: Props) {
   const isBatch = (request.operations?.length ?? 0) > 1
 
   // ── Find / in-panel search ────────────────────────────────────────────────
-  const [findOpen, setFindOpen] = useState(false)
-  const [findQuery, setFindQuery] = useState('')
+  // findOpen / findQuery are props (lifted to App for per-request persistence).
+  // Only navigation index and total count are local.
   const [findIndex, setFindIndex] = useState(0)  // 0-based
   const [findTotal, setFindTotal] = useState(0)
   const contentRef = useRef<HTMLDivElement>(null)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
 
-  // Open the find bar (or re-focus it) whenever App fires a Cmd+F nonce.
-  useEffect(() => {
-    if (findNonce == null) return
-    setFindOpen(true)
-  }, [findNonce])
-
-  // Reset navigation index when query or tab changes; query is kept across tabs.
-  useEffect(() => { setFindIndex(0) }, [findQuery, tab])
+  // Reset navigation index when query, tab, or request changes so the search
+  // always starts from the first match on each new context.
+  useEffect(() => { setFindIndex(0) }, [findQuery, tab, request.id])
 
   // ── Subscription grouping ─────────────────────────────────────────────────
   const [groupBySubscription, setGroupBySubscription] = useState(false)
@@ -411,7 +440,7 @@ export function DetailPanel({ request, onClose, jump, findNonce }: Props) {
       const safeIdx = ((findIndex % findTotal) + findTotal) % findTotal
       const frameIdx = frameMatchIndices[safeIdx]
       if (frameIdx !== undefined) {
-        virtuosoRef.current?.scrollToIndex({ index: frameIdx, behavior: 'smooth' })
+        virtuosoRef.current?.scrollToIndex({ index: frameIdx, align: 'center', behavior: 'auto' })
       }
     } else {
       if (!contentRef.current) return
@@ -419,12 +448,16 @@ export function DetailPanel({ request, onClose, jump, findNonce }: Props) {
       if (!marks.length) return
       const safeIdx = ((findIndex % marks.length) + marks.length) % marks.length
       marks.forEach((el, i) => el.classList.toggle('find-mark-active', i === safeIdx))
-      marks[safeIdx]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      marks[safeIdx]?.scrollIntoView({ block: 'center', behavior: 'auto' })
     }
   }, [findOpen, findQuery, findIndex, findTotal, isStreamTab, frameMatchIndices])
 
   const onFindNext = () => setFindIndex(i => (i + 1) % Math.max(1, findTotal))
   const onFindPrev = () => setFindIndex(i => (i - 1 + Math.max(1, findTotal)) % Math.max(1, findTotal))
+
+  // When findNonce changes, it means Cmd+F was pressed with the panel already open;
+  // just make sure the find bar input gets re-focused (findOpen is already true via App).
+  // The nonce is forwarded to DetailFindBar as focusTrigger.
 
   // ── Tab availability ──────────────────────────────────────────────────────
   const tabExists = (t: Tab): boolean => {
@@ -780,14 +813,14 @@ export function DetailPanel({ request, onClose, jump, findNonce }: Props) {
       {findOpen && (
         <div className="absolute bottom-3 right-3 z-20">
           <DetailFindBar
-            query={findQuery}
+            query={rawFindQuery}
             currentIndex={findTotal === 0 ? 0 : ((findIndex % findTotal) + findTotal) % findTotal + 1}
             total={findTotal}
             focusTrigger={findNonce}
-            onChange={q => { setFindQuery(q); setFindIndex(0) }}
+            onChange={q => { onFindQueryChange(q); setFindIndex(0) }}
             onPrev={onFindPrev}
             onNext={onFindNext}
-            onClose={() => { setFindOpen(false); setFindQuery('') }}
+            onClose={onFindClose}
           />
         </div>
       )}
