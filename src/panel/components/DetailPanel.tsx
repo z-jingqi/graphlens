@@ -204,13 +204,24 @@ function CollapsibleSection({
   )
 }
 
-function FrameRow({ frame, requestId, search }: { frame: CapturedFrame; requestId: string; search?: string }) {
+function FrameRow({
+  frame,
+  requestId,
+  search,
+  searchExpandToken,
+}: {
+  frame: CapturedFrame
+  requestId: string
+  search?: string
+  searchExpandToken?: string | number
+}) {
   const isSend = frame.direction === 'send'
   const [userExpanded, setUserExpanded] = useState(false)
   const hasMatch = search ? findMatches(frame.data, search).length > 0 : false
-  // Auto-expand when the frame contains a search match; keeps expanding even if
-  // the user has not explicitly clicked.
-  const expanded = userExpanded || hasMatch
+
+  useEffect(() => {
+    if (hasMatch) setUserExpanded(true)
+  }, [hasMatch, searchExpandToken])
 
   const frameTime = new Date(frame.timestamp)
   const timeBase = frameTime.toLocaleTimeString([], {
@@ -250,13 +261,14 @@ function FrameRow({ frame, requestId, search }: { frame: CapturedFrame; requestI
         </span>
         <span className="text-muted-foreground/60 font-mono shrink-0 ml-auto">{frame.data.length}B</span>
       </div>
-      {expanded && (
+      {userExpanded && (
         <div className="mt-1.5 bg-muted/40 rounded-md p-2 overflow-x-auto">
           {isJson
             ? <JsonTree
                 data={JSON.parse(frame.data)}
                 cacheKey={`${requestId}:frame:${frame.timestamp}`}
                 search={search}
+                searchExpandToken={searchExpandToken}
               />
             : <pre className="font-mono text-xs text-foreground leading-relaxed whitespace-pre-wrap break-all">
                 {search ? <Highlighted text={frame.data} query={search} /> : frame.data}
@@ -340,10 +352,11 @@ function BatchQueryTab({ operations, requestId, findQuery }: {
   )
 }
 
-function BatchVariablesTab({ operations, requestId, findQuery }: {
+function BatchVariablesTab({ operations, requestId, findQuery, searchExpandToken }: {
   operations: Classification[]
   requestId: string
   findQuery: string
+  searchExpandToken: number
 }) {
   return (
     <div className="flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto">
@@ -362,6 +375,7 @@ function BatchVariablesTab({ operations, requestId, findQuery }: {
                 data={op.variables}
                 cacheKey={`${requestId}:vars:${i}`}
                 search={findQuery || undefined}
+                searchExpandToken={searchExpandToken}
               />
             </div>
           ) : (
@@ -400,12 +414,19 @@ export function DetailPanel({
   // Only navigation index and total count are local.
   const [findIndex, setFindIndex] = useState(0)  // 0-based
   const [findTotal, setFindTotal] = useState(0)
+  const [searchExpandToken, setSearchExpandToken] = useState(0)
   const contentRef = useRef<HTMLDivElement>(null)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
 
   // Reset navigation index when query, tab, or request changes so the search
   // always starts from the first match on each new context.
   useEffect(() => { setFindIndex(0) }, [findQuery, tab, request.id])
+  useEffect(() => {
+    if (findQuery) setSearchExpandToken(n => n + 1)
+  }, [findQuery, tab, request.id])
+  useEffect(() => {
+    if (jump) setSearchExpandToken(n => n + 1)
+  }, [jump?.nonce])
 
   // ── Subscription grouping ─────────────────────────────────────────────────
   const [groupBySubscription, setGroupBySubscription] = useState(false)
@@ -452,10 +473,16 @@ export function DetailPanel({
       marks.forEach((el, i) => el.classList.toggle('find-mark-active', i === safeIdx))
       marks[safeIdx]?.scrollIntoView({ block: 'center', behavior: 'auto' })
     }
-  }, [findOpen, findQuery, findIndex, findTotal, isStreamTab, frameMatchIndices])
+  }, [findOpen, findQuery, findIndex, findTotal, isStreamTab, frameMatchIndices, searchExpandToken])
 
-  const onFindNext = () => setFindIndex(i => (i + 1) % Math.max(1, findTotal))
-  const onFindPrev = () => setFindIndex(i => (i - 1 + Math.max(1, findTotal)) % Math.max(1, findTotal))
+  const onFindNext = () => {
+    setFindIndex(i => (i + 1) % Math.max(1, findTotal))
+    setSearchExpandToken(n => n + 1)
+  }
+  const onFindPrev = () => {
+    setFindIndex(i => (i - 1 + Math.max(1, findTotal)) % Math.max(1, findTotal))
+    setSearchExpandToken(n => n + 1)
+  }
 
   // When findNonce changes, it means Cmd+F was pressed with the panel already open;
   // just make sure the find bar input gets re-focused (findOpen is already true via App).
@@ -633,6 +660,7 @@ export function DetailPanel({
               operations={request.operations!}
               requestId={request.id}
               findQuery={findQuery}
+              searchExpandToken={searchExpandToken}
             />
           ) : (
             c.variables !== undefined ? (
@@ -646,6 +674,7 @@ export function DetailPanel({
                     data={c.variables}
                     cacheKey={`${request.id}:vars`}
                     search={findQuery || undefined}
+                    searchExpandToken={searchExpandToken}
                   />
                 </div>
               </>
@@ -699,6 +728,7 @@ export function DetailPanel({
                           frame={frame}
                           requestId={request.id}
                           search={findQuery || undefined}
+                          searchExpandToken={searchExpandToken}
                         />
                       ))}
                     </div>
@@ -720,6 +750,7 @@ export function DetailPanel({
                       frame={frame}
                       requestId={request.id}
                       search={findQuery || undefined}
+                      searchExpandToken={searchExpandToken}
                     />
                   )
                 }}
@@ -750,6 +781,7 @@ export function DetailPanel({
                       data={responseJson}
                       cacheKey={`${request.id}:response`}
                       search={findQuery || undefined}
+                      searchExpandToken={searchExpandToken}
                     />
                   : <pre className="font-mono text-xs text-foreground leading-relaxed whitespace-pre-wrap break-all m-0">
                       {findQuery

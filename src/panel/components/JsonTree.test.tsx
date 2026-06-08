@@ -80,6 +80,42 @@ describe('JsonTree', () => {
     expect(container.textContent).toContain('[]')
   })
 
+  it('renders long arrays as collapsed index ranges', () => {
+    const data = Array.from({ length: 60 }, (_, i) => `item-${i}`)
+    const { container } = render(<JsonTree data={data} cacheKey={`t20-${Date.now()}`} />)
+
+    expect(container.textContent).toContain('[0…49]')
+    expect(container.textContent).toContain('[50…59]')
+    expect(container.textContent).not.toContain('item-55')
+  })
+
+  it('expands a long-array range on click', () => {
+    const data = Array.from({ length: 60 }, (_, i) => `item-${i}`)
+    const { container } = render(<JsonTree data={data} cacheKey={`t21-${Date.now()}`} />)
+    const range = screen.getByText('[50…59]').closest('[class*="cursor-pointer"]')
+
+    expect(range).not.toBeNull()
+    fireEvent.click(range!)
+
+    expect(container.textContent).toContain('item-55')
+    expect(container.textContent).not.toContain('item-10')
+  })
+
+  it('auto-expands the long-array range that contains a search match', () => {
+    const data = Array.from({ length: 60 }, (_, i) => `item-${i}`)
+    const { container } = render(
+      <JsonTree
+        data={data}
+        cacheKey={`t22-${Date.now()}`}
+        search="item-55"
+        searchExpandToken={1}
+      />
+    )
+
+    expect(container.textContent).toContain('item-55')
+    expect(container.textContent).not.toContain('item-10')
+  })
+
   // ── collapse/expand at depth ───────────────────────────────────────────────
 
   it('auto-collapses objects nested at depth > 2', () => {
@@ -111,10 +147,168 @@ describe('JsonTree', () => {
     // depth 3 would normally collapse; with a search that matches, it expands
     const data = { l1: { l2: { l3: { l4: 'searchTarget' } } } }
     const { container } = render(
-      <JsonTree data={data} cacheKey={`t14-${Date.now()}`} search="searchTarget" />
+      <JsonTree
+        data={data}
+        cacheKey={`t14-${Date.now()}`}
+        search="searchTarget"
+        searchExpandToken={1}
+      />
     )
     // Force-expanded because search query matches deep content
     expect(container.textContent).toContain('searchTarget')
+  })
+
+  it('allows manually collapsing an auto-expanded search match', () => {
+    const data = { l1: { l2: { l3: { l4: 'searchTarget' } } } }
+    const { container } = render(
+      <JsonTree
+        data={data}
+        cacheKey={`t16-${Date.now()}`}
+        search="searchTarget"
+        searchExpandToken={1}
+      />
+    )
+    expect(container.textContent).toContain('searchTarget')
+
+    const rows = container.querySelectorAll('[class*="cursor-pointer"]')
+    fireEvent.click(rows[0])
+
+    expect(container.textContent).not.toContain('searchTarget')
+  })
+
+  it('keeps search match count stable when a matched subtree is collapsed', () => {
+    const data = {
+      first: { value: 'needle' },
+      second: { value: 'needle' },
+    }
+    const { container } = render(
+      <JsonTree
+        data={data}
+        cacheKey={`t23-${Date.now()}`}
+        search="needle"
+        searchExpandToken={1}
+      />
+    )
+    expect(container.querySelectorAll('[data-find-mark]')).toHaveLength(2)
+
+    const firstRow = screen.getByText('first').closest('[class*="cursor-pointer"]')
+    expect(firstRow).not.toBeNull()
+    fireEvent.click(firstRow!)
+
+    expect(container.querySelectorAll('[data-find-mark]')).toHaveLength(2)
+  })
+
+  it('keeps long-array search match count stable when a matched range is collapsed', () => {
+    const data = Array.from({ length: 60 }, (_, i) => i === 55 || i === 56 ? 'needle' : `item-${i}`)
+    const { container } = render(
+      <JsonTree
+        data={data}
+        cacheKey={`t24-${Date.now()}`}
+        search="needle"
+        searchExpandToken={1}
+      />
+    )
+    expect(container.querySelectorAll('[data-find-mark]')).toHaveLength(2)
+
+    const range = screen.getByText('[50…59]').closest('[class*="cursor-pointer"]')
+    expect(range).not.toBeNull()
+    fireEvent.click(range!)
+
+    expect(container.textContent).not.toContain('needle')
+    expect(container.querySelectorAll('[data-find-mark]')).toHaveLength(2)
+  })
+
+  it('re-expands a collapsed long-array range when the expand token changes', () => {
+    const data = Array.from({ length: 60 }, (_, i) => i === 55 ? 'needle' : `item-${i}`)
+    const cacheKey = `t25-${Date.now()}`
+    const { container, rerender } = render(
+      <JsonTree
+        data={data}
+        cacheKey={cacheKey}
+        search="needle"
+        searchExpandToken={1}
+      />
+    )
+    expect(container.textContent).toContain('needle')
+
+    const range = screen.getByText('[50…59]').closest('[class*="cursor-pointer"]')
+    expect(range).not.toBeNull()
+    fireEvent.click(range!)
+    expect(container.textContent).not.toContain('needle')
+
+    rerender(
+      <JsonTree
+        data={data}
+        cacheKey={cacheKey}
+        search="needle"
+        searchExpandToken={2}
+      />
+    )
+
+    expect(container.textContent).toContain('needle')
+  })
+
+  it('re-expands a manually collapsed search match when the expand token changes', () => {
+    const data = { l1: { l2: { l3: { l4: 'searchTarget' } } } }
+    const cacheKey = `t17-${Date.now()}`
+    const { container, rerender } = render(
+      <JsonTree
+        data={data}
+        cacheKey={cacheKey}
+        search="searchTarget"
+        searchExpandToken={1}
+      />
+    )
+
+    const rows = container.querySelectorAll('[class*="cursor-pointer"]')
+    fireEvent.click(rows[0])
+    expect(container.textContent).not.toContain('searchTarget')
+
+    rerender(
+      <JsonTree
+        data={data}
+        cacheKey={cacheKey}
+        search="searchTarget"
+        searchExpandToken={2}
+      />
+    )
+
+    expect(container.textContent).toContain('searchTarget')
+  })
+
+  it('does not persist search-driven expansion to the collapse cache', () => {
+    const data = { l1: { l2: { l3: { l4: 'searchTarget' } } } }
+    const cacheKey = `t18-${Date.now()}`
+    const { container, unmount } = render(
+      <JsonTree
+        data={data}
+        cacheKey={cacheKey}
+        search="searchTarget"
+        searchExpandToken={1}
+      />
+    )
+    expect(container.textContent).toContain('searchTarget')
+
+    unmount()
+    const fresh = render(<JsonTree data={data} cacheKey={cacheKey} />)
+
+    expect(fresh.container.textContent).not.toContain('searchTarget')
+  })
+
+  it('persists manual collapse to the collapse cache', () => {
+    const data = { x: 'visible-value' }
+    const cacheKey = `t19-${Date.now()}`
+    const { container, unmount } = render(<JsonTree data={data} cacheKey={cacheKey} />)
+    expect(container.textContent).toContain('visible-value')
+
+    const rows = container.querySelectorAll('[class*="cursor-pointer"]')
+    fireEvent.click(rows[0])
+    expect(container.textContent).not.toContain('visible-value')
+
+    unmount()
+    const fresh = render(<JsonTree data={data} cacheKey={cacheKey} />)
+
+    expect(fresh.container.textContent).not.toContain('visible-value')
   })
 
   it('highlights search matches with mark elements', () => {

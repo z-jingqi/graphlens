@@ -86,6 +86,9 @@ export function App() {
 
   const handleSearchHitClick = (requestId: string, location: SearchLocation) => {
     setSelectedId(requestId)
+    if (search.query) {
+      setFindStates(p => ({ ...p, [requestId]: { open: true, query: search.query } }))
+    }
     setDetailJump({ requestId, location, nonce: Date.now() })
   }
 

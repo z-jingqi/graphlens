@@ -1,12 +1,14 @@
-import { useState, useEffect, useRef, createContext, useContext, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, createContext, useContext, useMemo } from 'react'
 import clsx from 'clsx'
 import { copyToClipboard } from '../lib/copy'
 import { getCollapsed, setCollapsed as cacheSetCollapsed } from '../lib/jsonCollapseCache'
 import { Highlighted } from './Highlighted'
-import { dataContains, findMatches } from '../search/match'
+import { findMatches } from '../search/match'
 
 const STR_MAX = 100
 const SNIPPET_CTX = 30
+const ARRAY_GROUP_THRESHOLD = 50
+const ARRAY_GROUP_SIZE = 50
 
 function getDisplayString(
   data: string,
@@ -47,9 +49,29 @@ const MenuCtx = createContext<MenuCtxValue>({ openMenu: () => {} })
 
 const CollapseCtx = createContext<string | undefined>(undefined)
 
-// ── Find / search context (query string, empty = inactive) ────────────────────
+// ── Find / search context ─────────────────────────────────────────────────────
 
-const FindCtx = createContext<string>('')
+interface FindCtxValue {
+  query: string
+  expandToken?: string | number
+  searchIndex: SearchIndex
+}
+
+interface SearchIndex {
+  matchedSubtreePaths: Set<string>
+  matchCountByPath: Map<string, number>
+  keyMatchCountByPath: Map<string, number>
+}
+
+function emptySearchIndex(): SearchIndex {
+  return {
+    matchedSubtreePaths: new Set(),
+    matchCountByPath: new Map(),
+    keyMatchCountByPath: new Map(),
+  }
+}
+
+const FindCtx = createContext<FindCtxValue>({ query: '', searchIndex: emptySearchIndex() })
 
 function primitiveText(value: unknown): string {
   if (value === null) return 'null'
@@ -62,6 +84,107 @@ function buildChildPath(parentPath: string, key: string, isIndex: boolean): stri
   if (isIndex) return `${parentPath}[${key}]`
   if (/^[A-Za-z_$][\w$]*$/.test(key)) return parentPath ? `${parentPath}.${key}` : key
   return `${parentPath}["${key.replace(/"/g, '\\"')}"]`
+}
+
+function buildArrayGroupPath(parentPath: string, start: number, end: number): string {
+  return `${parentPath}[${start}..${end}]`
+}
+
+function createTextMatcher(query: string): (text: string) => boolean {
+  const regexMatch = query.match(/^\/(.+)\/([gimsuy]*)$/)
+  if (regexMatch) {
+    try {
+      const flags = (regexMatch[2] || '').replace(/g/g, '')
+      const re = new RegExp(regexMatch[1], flags)
+      return (text: string) => re.test(text)
+    } catch {
+      // invalid regex — fall through to substring
+    }
+  }
+
+  const q = query.toLowerCase()
+  return (text: string) => text.toLowerCase().includes(q)
+}
+
+function buildSearchIndex(data: unknown, query: string): SearchIndex {
+  const searchIndex = emptySearchIndex()
+  const { matchedSubtreePaths, matchCountByPath, keyMatchCountByPath } = searchIndex
+  if (!query) return searchIndex
+
+  const matchesText = createTextMatcher(query)
+  const seen = new WeakSet<object>()
+
+  const addMatchPath = (ancestors: string[], path: string, count: number) => {
+    ancestors.forEach(p => {
+      matchedSubtreePaths.add(p)
+      matchCountByPath.set(p, (matchCountByPath.get(p) ?? 0) + count)
+    })
+    matchedSubtreePaths.add(path)
+    matchCountByPath.set(path, (matchCountByPath.get(path) ?? 0) + count)
+  }
+
+  const visit = (value: unknown, path: string, ancestors: string[]): boolean => {
+    if (value === null || typeof value !== 'object') {
+      const text = typeof value === 'string'
+        ? getDisplayString(value, query).display
+        : primitiveText(value)
+      const count = findMatches(text, query).length
+      if (count === 0) return false
+      addMatchPath(ancestors, path, count)
+      return true
+    }
+
+    if (seen.has(value)) return false
+    seen.add(value)
+
+    let hasMatch = false
+    if (Array.isArray(value)) {
+      const grouped = value.length > ARRAY_GROUP_THRESHOLD
+      value.forEach((child, i) => {
+        const childPath = buildChildPath(path, String(i), true)
+        const childAncestors = grouped
+          ? [
+              ...ancestors,
+              path,
+              buildArrayGroupPath(
+                path,
+                Math.floor(i / ARRAY_GROUP_SIZE) * ARRAY_GROUP_SIZE,
+                Math.min(value.length - 1, Math.floor(i / ARRAY_GROUP_SIZE) * ARRAY_GROUP_SIZE + ARRAY_GROUP_SIZE - 1)
+              ),
+            ]
+          : [...ancestors, path]
+        if (visit(child, childPath, childAncestors)) hasMatch = true
+      })
+    } else {
+      Object.entries(value as Record<string, unknown>).forEach(([key, child]) => {
+        const childPath = buildChildPath(path, key, false)
+        if (matchesText(key)) {
+          const count = findMatches(key, query).length
+          keyMatchCountByPath.set(childPath, count)
+          addMatchPath(ancestors, childPath, count)
+          hasMatch = true
+        }
+        if (visit(child, childPath, [...ancestors, path])) hasMatch = true
+      })
+    }
+
+    if (hasMatch) matchedSubtreePaths.add(path)
+    return hasMatch
+  }
+
+  visit(data, '', [])
+  return searchIndex
+}
+
+function HiddenFindMarks({ count }: { count: number }) {
+  if (count <= 0) return null
+  return (
+    <span className="sr-only" aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => (
+        <mark key={i} data-find-mark />
+      ))}
+    </span>
+  )
 }
 
 function JsonContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }) {
@@ -139,10 +262,143 @@ function isExpandable(val: unknown): boolean {
   return Object.keys(val as object).length > 0
 }
 
+function renderKeyLabel(label: string, isIdx: boolean, findQuery: string) {
+  if (isIdx) {
+    return (
+      <><span className="text-muted-foreground">{label}</span><span className="text-muted-foreground">:&nbsp;</span></>
+    )
+  }
+  return (
+    <><span className="json-key">&quot;{findQuery ? <Highlighted text={label} query={findQuery} /> : label}&quot;</span><span className="text-muted-foreground">:&nbsp;</span></>
+  )
+}
+
+function JsonEntry({
+  entryKey,
+  val,
+  parentPath,
+  depth,
+  comma,
+}: {
+  entryKey: string
+  val: unknown
+  parentPath: string
+  depth: number
+  comma: boolean
+}) {
+  const { openMenu } = useContext(MenuCtx)
+  const { query: findQuery } = useContext(FindCtx)
+  const isIndex = /^\d+$/.test(entryKey)
+  const kPath = buildChildPath(parentPath, entryKey, isIndex)
+
+  if (isExpandable(val)) {
+    return (
+      <JsonNode
+        data={val}
+        depth={depth}
+        path={kPath}
+        keyLabel={entryKey}
+        comma={comma}
+      />
+    )
+  }
+
+  return (
+    <div
+      className="flex items-center gap-0 h-[25px] rounded hover:bg-accent/50 -mx-1 px-1 cursor-default"
+      onContextMenu={e => { e.preventDefault(); e.stopPropagation(); openMenu(e, val, kPath) }}
+    >
+      <span className="w-3.5 shrink-0" />
+      {renderKeyLabel(entryKey, isIndex, findQuery)}
+      <JsonNode data={val} depth={depth} path={kPath} />
+      {comma && <span className="text-muted-foreground">,</span>}
+    </div>
+  )
+}
+
+function JsonArrayRange({
+  array,
+  start,
+  end,
+  parentPath,
+  itemDepth,
+  comma,
+}: {
+  array: unknown[]
+  start: number
+  end: number
+  parentPath: string
+  itemDepth: number
+  comma: boolean
+}) {
+  const { openMenu } = useContext(MenuCtx)
+  const cacheKey = useContext(CollapseCtx)
+  const { query: findQuery, expandToken, searchIndex } = useContext(FindCtx)
+  const rangePath = buildArrayGroupPath(parentPath, start, end)
+  const [collapsed, setCollapsed] = useState(() =>
+    cacheKey ? getCollapsed(cacheKey, rangePath, 3) : true
+  )
+  const rangeHasMatch = searchIndex.matchedSubtreePaths.has(rangePath)
+  const hiddenMatchCount = searchIndex.matchCountByPath.get(rangePath) ?? 0
+
+  useLayoutEffect(() => {
+    if (rangeHasMatch) setCollapsed(false)
+  }, [rangeHasMatch, expandToken, findQuery])
+
+  const toggle = () => setCollapsed(c => {
+    const next = !c
+    if (cacheKey) cacheSetCollapsed(cacheKey, rangePath, next)
+    return next
+  })
+  const ctxMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    openMenu(e, array.slice(start, end + 1), rangePath)
+  }
+
+  const label = `[${start}…${end}]`
+  const count = end - start + 1
+
+  return (
+    <div>
+      <div
+        className="flex items-center gap-1 h-[25px] cursor-pointer rounded hover:bg-accent/50 -mx-1 px-1"
+        onClick={toggle}
+        onContextMenu={ctxMenu}
+      >
+        <Triangle open={!collapsed} />
+        <span className="text-muted-foreground">{label}</span>
+        <span className="text-[10px] text-muted-foreground/60">
+          {count} item{count !== 1 ? 's' : ''}
+        </span>
+        {collapsed && <HiddenFindMarks count={hiddenMatchCount} />}
+        {collapsed && comma && <span className="text-muted-foreground">,</span>}
+      </div>
+      {!collapsed && (
+        <div className="pl-4">
+          {array.slice(start, end + 1).map((val, offset) => {
+            const i = start + offset
+            return (
+              <JsonEntry
+                key={i}
+                entryKey={String(i)}
+                val={val}
+                parentPath={parentPath}
+                depth={itemDepth}
+                comma={i < array.length - 1}
+              />
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
   const { openMenu } = useContext(MenuCtx)
   const cacheKey = useContext(CollapseCtx)
-  const findQuery = useContext(FindCtx)
+  const { query: findQuery, expandToken, searchIndex } = useContext(FindCtx)
 
   const [collapsed, setCollapsed] = useState(() =>
     cacheKey ? getCollapsed(cacheKey, path, depth) : depth > 2
@@ -153,21 +409,19 @@ function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
     return next
   })
 
-  // When find is active and this node's subtree contains a match, force-expand it.
-  const subtreeHasMatch = useMemo(() => {
-    if (!findQuery || !isExpandable(data)) return false
-    return dataContains(data, findQuery)
-  }, [findQuery, data])
+  // When find navigation highlights a match in this subtree, expand once.
+  // The current search should not keep overriding a user's manual collapse.
+  const subtreeHasMatch = isExpandable(data) && searchIndex.matchedSubtreePaths.has(path)
+  const hiddenMatchCount = Math.max(
+    0,
+    (searchIndex.matchCountByPath.get(path) ?? 0) - (searchIndex.keyMatchCountByPath.get(path) ?? 0)
+  )
 
-  // When a search match forces this node open, commit that to local state so it
-  // stays open after the find bar is closed (subtreeHasMatch → false, but
-  // collapsed is already false, so effectiveCollapsed stays false).
-  // Not written to the cache — this is search-driven, not a user toggle.
-  useEffect(() => {
+  // Search-driven expansion is local UI state only; user toggles still own the
+  // persisted collapse cache.
+  useLayoutEffect(() => {
     if (subtreeHasMatch) setCollapsed(false)
-  }, [subtreeHasMatch])
-
-  const effectiveCollapsed = collapsed && !subtreeHasMatch
+  }, [subtreeHasMatch, expandToken, findQuery])
 
   const ctxMenu = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -232,19 +486,8 @@ function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
     )
   }
 
-  const renderKeyLabel = (label: string, isIdx: boolean) => {
-    if (isIdx) {
-      return (
-        <><span className="text-muted-foreground">{label}</span><span className="text-muted-foreground">:&nbsp;</span></>
-      )
-    }
-    return (
-      <><span className="json-key">&quot;{findQuery ? <Highlighted text={label} query={findQuery} /> : label}&quot;</span><span className="text-muted-foreground">:&nbsp;</span></>
-    )
-  }
-
   // ── Collapsed ─────────────────────────────────────────────────────────────
-  if (effectiveCollapsed) {
+  if (collapsed) {
     return (
       <div
         className="flex items-center gap-1 h-[25px] cursor-pointer rounded hover:bg-accent/50 -mx-1 px-1"
@@ -252,11 +495,12 @@ function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
         onContextMenu={ctxMenu}
       >
         <Triangle open={false} />
-        {keyLabel !== undefined && renderKeyLabel(keyLabel, /^\d+$/.test(keyLabel))}
+        {keyLabel !== undefined && renderKeyLabel(keyLabel, /^\d+$/.test(keyLabel), findQuery)}
         <span className="text-muted-foreground">
           {openBr}<span className="text-[10px]">…</span>{closeBr}
         </span>
         <span className="text-[10px] text-muted-foreground/60">{summary}</span>
+        <HiddenFindMarks count={hiddenMatchCount} />
         {comma && <span className="text-muted-foreground">,</span>}
       </div>
     )
@@ -271,44 +515,38 @@ function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
         onContextMenu={ctxMenu}
       >
         <Triangle open={true} />
-        {keyLabel !== undefined && renderKeyLabel(keyLabel, /^\d+$/.test(keyLabel))}
+        {keyLabel !== undefined && renderKeyLabel(keyLabel, /^\d+$/.test(keyLabel), findQuery)}
         <span className="text-muted-foreground">{openBr}</span>
         <span className="text-[10px] text-muted-foreground/60">{summary}</span>
       </div>
 
       <div className="pl-4">
-        {entries.map(([key, val], i) => {
-          const hasComma = i < entries.length - 1
-          const isIndex = /^\d+$/.test(key)
-          const kPath = buildChildPath(path, key, isIndex)
-          if (isExpandable(val)) {
-            return (
-              <JsonNode
-                key={key}
-                data={val}
-                depth={depth + 1}
-                path={kPath}
-                keyLabel={key}
-                comma={hasComma}
-              />
-            )
-          }
-          return (
-            <div
+        {isArr && count > ARRAY_GROUP_THRESHOLD
+          ? Array.from({ length: Math.ceil(count / ARRAY_GROUP_SIZE) }, (_, groupIndex) => {
+              const start = groupIndex * ARRAY_GROUP_SIZE
+              const end = Math.min(count - 1, start + ARRAY_GROUP_SIZE - 1)
+              return (
+                <JsonArrayRange
+                  key={`${start}-${end}`}
+                  array={data as unknown[]}
+                  start={start}
+                  end={end}
+                  parentPath={path}
+                  itemDepth={depth + 1}
+                  comma={end < count - 1}
+                />
+              )
+            })
+          : entries.map(([key, val], i) => (
+            <JsonEntry
               key={key}
-              className="flex items-center gap-0 h-[25px] rounded hover:bg-accent/50 -mx-1 px-1 cursor-default"
-              onContextMenu={e => { e.preventDefault(); e.stopPropagation(); openMenu(e, val, kPath) }}
-            >
-              <span className="w-3.5 shrink-0" />
-              {isIndex
-                ? <><span className="text-muted-foreground">{key}</span><span className="text-muted-foreground">:&nbsp;</span></>
-                : <><span className="json-key">&quot;{findQuery ? <Highlighted text={key} query={findQuery} /> : key}&quot;</span><span className="text-muted-foreground">:&nbsp;</span></>
-              }
-              <JsonNode data={val} depth={depth + 1} path={kPath} />
-              {hasComma && <span className="text-muted-foreground">,</span>}
-            </div>
-          )
-        })}
+              entryKey={key}
+              val={val}
+              parentPath={path}
+              depth={depth + 1}
+              comma={i < entries.length - 1}
+            />
+          ))}
       </div>
 
       <div className="flex items-center h-[25px]" onContextMenu={ctxMenu}>
@@ -321,8 +559,22 @@ function JsonNode({ data, depth, path, keyLabel, comma = false }: NodeProps) {
 
 // ── Public export ─────────────────────────────────────────────────────────────
 
-export function JsonTree({ data, cacheKey, search }: { data: unknown; cacheKey?: string; search?: string }) {
+export function JsonTree({
+  data,
+  cacheKey,
+  search,
+  searchExpandToken,
+}: {
+  data: unknown
+  cacheKey?: string
+  search?: string
+  searchExpandToken?: string | number
+}) {
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const searchIndex = useMemo(
+    () => buildSearchIndex(data, search ?? ''),
+    [data, search]
+  )
 
   const openMenu = (e: React.MouseEvent, value: unknown, path: string) => {
     setMenu({ x: e.clientX, y: e.clientY, value, path })
@@ -331,7 +583,7 @@ export function JsonTree({ data, cacheKey, search }: { data: unknown; cacheKey?:
   return (
     <MenuCtx.Provider value={{ openMenu }}>
       <CollapseCtx.Provider value={cacheKey}>
-        <FindCtx.Provider value={search ?? ''}>
+        <FindCtx.Provider value={{ query: search ?? '', expandToken: searchExpandToken, searchIndex }}>
           <div className="font-mono text-xs leading-6">
             <JsonNode key={cacheKey} data={data} depth={0} path="" />
           </div>
