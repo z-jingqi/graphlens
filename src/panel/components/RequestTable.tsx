@@ -256,7 +256,6 @@ export function RequestTable({
 
   const showLocate =
     !!selected &&
-    requests.length > 100 &&
     selectedIndex >= 0 &&
     (selectedIndex < visibleRange.startIndex || selectedIndex > visibleRange.endIndex)
 

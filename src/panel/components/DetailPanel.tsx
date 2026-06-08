@@ -212,9 +212,11 @@ function FrameRow({ frame, requestId, search }: { frame: CapturedFrame; requestI
   // the user has not explicitly clicked.
   const expanded = userExpanded || hasMatch
 
-  const time = new Date(frame.timestamp).toLocaleTimeString([], {
-    hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3,
+  const frameTime = new Date(frame.timestamp)
+  const timeBase = frameTime.toLocaleTimeString([], {
+    hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
   })
+  const time = `${timeBase}.${String(frameTime.getMilliseconds()).padStart(3, '0')}`
   const preview = frame.data.length > 120 ? frame.data.slice(0, 120) + '…' : frame.data
   const isJson = (() => { try { JSON.parse(frame.data); return true } catch { return false } })()
 
